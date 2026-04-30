@@ -23,14 +23,25 @@ def get_free_games():
     url = "https://api.isthereanydeal.com/deals/v2"
     params = {
         "key": ITAD_API_KEY,
-        "filter": "free"
+        "country": "IT",
+        "limit": 50,
+        "sort": "price"
     }
 
     response = requests.get(url, params=params)
     response.raise_for_status()
 
     data = response.json()
-    return data.get("list", [])
+
+    free_games = []
+
+    for deal in data.get("list", []):
+        price_new = deal.get("price", {}).get("amount")
+
+        if price_new == 0:
+            free_games.append(deal)
+
+    return free_games
 
 def send_telegram_message(text):
     url = f"https://api.telegram.org/bot{BOT_TOKEN}/sendMessage"
