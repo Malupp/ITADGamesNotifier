@@ -7,6 +7,7 @@ load_dotenv()
 
 BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN")
 CHAT_ID = os.getenv("TELEGRAM_CHAT_ID")
+CHAT_ID_GROUP = os.getenv("TELEGRAM_CHAT_GROUP")  # opzionale
 ITAD_API_KEY = os.getenv("ITAD_API_KEY")
 
 STATE_FILE = "state.json"
@@ -55,16 +56,19 @@ def format_expiry(expiry_str):
     except:
         return None
 
-
 def send_telegram_message(text):
     url = f"https://api.telegram.org/bot{BOT_TOKEN}/sendMessage"
-    payload = {
-        "chat_id": CHAT_ID,
-        "text": text,
-        "parse_mode": "HTML",
-        "disable_web_page_preview": False
-    }
-    requests.post(url, json=payload).raise_for_status()
+
+    targets = [c for c in [CHAT_ID, CHAT_ID_GROUP] if c]  # ignora se non impostato
+
+    for chat_id in targets:
+        payload = {
+            "chat_id": chat_id,
+            "text": text,
+            "parse_mode": "HTML",
+            "disable_web_page_preview": False
+        }
+        requests.post(url, json=payload).raise_for_status()
 
 
 def main():
