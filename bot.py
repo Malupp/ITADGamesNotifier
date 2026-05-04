@@ -260,12 +260,44 @@ async def cmd_wishlist(update: Update, context: ContextTypes.DEFAULT_TYPE):
         )
         return
 
-    lines = [f"📋 <b>La tua wishlist ({len(items)} giochi):</b>\n"]
-    for i, item in enumerate(items, 1):
-        lines.append(f"{i}. {item['game_title']}")
-    lines.append("\nUsa /remove per rimuovere un gioco.")
+    await update.message.reply_text("🔍 Carico prezzi attuali...")
 
-    await update.message.reply_text("\n".join(lines), parse_mode="HTML")
+    # Recupera prezzi per tutti i giochi in una sola chiamata
+    slugs = [item["game_slug"] for item in items]
+    try:
+        prices_data = get_game_prices(slugs)
+    except:
+        prices_data = {}
+
+    lines = [f"📋 <b>La tua wishlist ({len(items)} giochi):</b>\n"]
+
+    for item in items:
+        title = item["game_title"]
+        slug  = item["game_slug"]
+        game_data = prices_data.get(slug)
+
+        if game_data and game_data.get("deals"):
+            best  = min(game_data["deals"], key=lambda x: x["price"]["amount"])
+            price = best["price"]["amount"]
+            shop  = best.get("shop", {}).get("name", "?")
+            url   = best.get("url", "")
+
+            if price == 0:
+                price_str = f'<b>GRATIS</b> su {shop} — <a href="{url}">link</a>'
+            else:
+                price_str = f'<b>€{price}</b> su {shop} — <a href="{url}">link</a>'
+        else:
+            price_str = "prezzo non disponibile"
+
+        lines.append(f"🎮 <b>{title}</b>\n   💰 {price_str}\n")
+
+    lines.append("Usa /remove per rimuovere un gioco.")
+
+    await update.message.reply_text(
+        "\n".join(lines),
+        parse_mode="HTML",
+        disable_web_page_preview=True
+    )
 
 
 # ─── CALLBACK BUTTONS ────────────────────────────────────────────────────────
