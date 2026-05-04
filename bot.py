@@ -134,8 +134,12 @@ async def cmd_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "/cerca &lt;titolo&gt; — cerca prezzi di un gioco\n"
         "/wishlist — vedi la tua wishlist\n"
         "/add &lt;titolo&gt; — aggiungi un gioco alla wishlist\n"
+        "  <i>└ ti avviso automaticamente se il prezzo scende!</i>\n"
         "/remove — rimuovi un gioco dalla wishlist\n"
-        "/help — mostra questo messaggio",
+        "/help — mostra questo messaggio\n\n"
+        "🔔 <b>Monitoraggio prezzi automatico:</b>\n"
+        "Ogni ora controllo i prezzi dei giochi nella tua wishlist. "
+        "Se un gioco scende di prezzo ti mando una notifica direttamente qui!",
         parse_mode="HTML"
     )
 
@@ -347,21 +351,20 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
         price_str = f" (prezzo attuale: €{current_price})" if current_price is not None else ""
 
         if added:
-
             await query.edit_message_text(
-
-                f"✅ <b>{game['title']}</b> aggiunto alla wishlist{price_str}!\n"
-
-                f"🔔 Ti avviserò se il prezzo scende.", parse_mode="HTML"
-
+                f"✅ <b>{game['title']}</b> aggiunto alla wishlist!\n\n"
+                f"🔔 <b>Come funziona il monitoraggio prezzi:</b>\n"
+                f"Ogni ora controllo automaticamente il prezzo di questo gioco. "
+                f"Se scende rispetto al prezzo attuale (€{current_price if current_price is not None else '?'}), "
+                f"ti mando un messaggio direttamente qui.\n\n"
+                f"Non devi fare nulla, ci penso io! 😊",
+                parse_mode="HTML"
             )
-
         else:
-
             await query.edit_message_text(
-
-                f"ℹ️ <b>{game['title']}</b> è già nella tua wishlist.", parse_mode="HTML"
-
+                f"ℹ️ <b>{game['title']}</b> è già nella tua wishlist.\n"
+                f"Stai già ricevendo notifiche sui cali di prezzo.",
+                parse_mode="HTML"
             )
 
     elif action == "remwish":
