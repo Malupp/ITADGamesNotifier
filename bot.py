@@ -182,11 +182,14 @@ async def cmd_cerca(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text("😔 Nessun risultato trovato.")
         return
 
+    # Salva i risultati in memoria per recuperarli nel callback
+    context.user_data["search_results"] = {str(i): g for i, g in enumerate(results[:5])}
+
     keyboard = [
-        [InlineKeyboardButton(g["title"], callback_data=f"price|{g['id']}|{g['title'][:40]}")]
-        for g in results[:5]
+        [InlineKeyboardButton(g["title"], callback_data=f"price|{i}")]
+        for i, g in enumerate(results[:5])
     ]
-    keyboard.append([InlineKeyboardButton("❌ Annulla", callback_data="cancel|0|0")])
+    keyboard.append([InlineKeyboardButton("❌ Annulla", callback_data="cancel")])
 
     await update.message.reply_text(
         "Seleziona il gioco per vedere i prezzi:",
@@ -206,11 +209,13 @@ async def cmd_add(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text("😔 Nessun risultato trovato.")
         return
 
+    context.user_data["add_results"] = {str(i): g for i, g in enumerate(results[:5])}
+
     keyboard = [
-        [InlineKeyboardButton(g["title"], callback_data=f"addwish|{g['id']}|{g['title'][:40]}")]
-        for g in results[:5]
+        [InlineKeyboardButton(g["title"], callback_data=f"addwish|{i}")]
+        for i, g in enumerate(results[:5])
     ]
-    keyboard.append([InlineKeyboardButton("❌ Annulla", callback_data="cancel|0|0")])
+    keyboard.append([InlineKeyboardButton("❌ Annulla", callback_data="cancel")])
 
     await update.message.reply_text(
         "Quale vuoi aggiungere alla wishlist?",
@@ -225,11 +230,13 @@ async def cmd_remove(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text("📋 La tua wishlist è vuota.")
         return
 
+    context.user_data["remove_items"] = {str(i): item for i, item in enumerate(items)}
+
     keyboard = [
-        [InlineKeyboardButton(f"❌ {i['game_title']}", callback_data=f"remwish|{i['game_slug']}|{i['game_title'][:40]}")]
-        for i in items
+        [InlineKeyboardButton(f"❌ {item['game_title']}", callback_data=f"remwish|{i}")]
+        for i, item in enumerate(items)
     ]
-    keyboard.append([InlineKeyboardButton("🔙 Annulla", callback_data="cancel|0|0")])
+    keyboard.append([InlineKeyboardButton("🔙 Annulla", callback_data="cancel")])
 
     await update.message.reply_text(
         "Seleziona il gioco da rimuovere:",
@@ -260,14 +267,23 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     await query.answer()
 
-    parts = query.data.split("|", 2)
-    action, game_id, game_title = parts[0], parts[1], parts[2]
+    parts = query.data.split("|")
+    action = parts[0]
 
     if action == "cancel":
         await query.edit_message_text("✅ Operazione annullata.")
         return
 
     if action == "price":
+        idx = parts[1]
+        game = context.user_data.get("search_results", {}).get(idx)
+        if not game:
+            await query.edit_message_text("❌ Sessione scaduta, rifai /cerca.")
+            return
+
+        game_id    = game["id"]
+        game_title = game["title"]
+
         await query.edit_message_text(
             f"🔍 Carico prezzi per <b>{game_title}</b>...", parse_mode="HTML"
         )
@@ -282,10 +298,10 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
         lines = [f"💰 <b>Prezzi per {game_title}:</b>\n"]
         for deal in sorted(game_data["deals"], key=lambda x: x["price"]["amount"])[:8]:
-            shop  = deal.get("shop", {}).get("name", "?")
-            price = deal.get("price", {}).get("amount", 0)
-            cut   = deal.get("cut", 0)
-            url   = deal.get("url", "")
+            shop    = deal.get("shop", {}).get("name", "?")
+            price   = deal.get("price", {}).get("amount", 0)
+            cut     = deal.get("cut", 0)
+            url     = deal.get("url", "")
             cut_str = f" (-{cut}%)" if cut > 0 else ""
             lines.append(f"🏪 {shop}: <b>€{price}</b>{cut_str} — <a href='{url}'>link</a>")
 
@@ -294,27 +310,38 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
         )
 
     elif action == "addwish":
-        user   = query.from_user
-        added  = wishlist_add(user.id, user.username or user.first_name, game_id, game_title)
+        idx  = parts[1]
+        game = context.user_data.get("add_results", {}).get(idx)
+        if not game:
+            await query.edit_message_text("❌ Sessione scaduta, rifai /add.")
+            return
+
+        user  = query.from_user
+        added = wishlist_add(user.id, user.username or user.first_name, game["id"], game["title"])
 
         if added:
             await query.edit_message_text(
-                f"✅ <b>{game_title}</b> aggiunto alla wishlist!", parse_mode="HTML"
+                f"✅ <b>{game['title']}</b> aggiunto alla wishlist!", parse_mode="HTML"
             )
         else:
             await query.edit_message_text(
-                f"ℹ️ <b>{game_title}</b> è già nella tua wishlist.", parse_mode="HTML"
+                f"ℹ️ <b>{game['title']}</b> è già nella tua wishlist.", parse_mode="HTML"
             )
 
     elif action == "remwish":
-        removed = wishlist_remove(query.from_user.id, game_id)
+        idx  = parts[1]
+        item = context.user_data.get("remove_items", {}).get(idx)
+        if not item:
+            await query.edit_message_text("❌ Sessione scaduta, rifai /remove.")
+            return
+
+        removed = wishlist_remove(query.from_user.id, item["game_slug"])
         if removed:
             await query.edit_message_text(
-                f"✅ <b>{game_title}</b> rimosso dalla wishlist.", parse_mode="HTML"
+                f"✅ <b>{item['game_title']}</b> rimosso dalla wishlist.", parse_mode="HTML"
             )
         else:
             await query.edit_message_text("❌ Gioco non trovato nella wishlist.")
-
 
 # ─── AVVIO ────────────────────────────────────────────────────────────────────
 
