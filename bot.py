@@ -422,5 +422,16 @@ def main():
     print("✅ Bot avviato...")
     app.run_polling(drop_pending_updates=True)
 
+    # Webhook invece di polling
+    WEBHOOK_URL = os.getenv("WEBHOOK_URL")  # es. https://itad-bot.onrender.com
+    PORT = int(os.getenv("PORT", 8443))
+
+    app.run_webhook(
+        listen="0.0.0.0",
+        port=PORT,
+        webhook_url=f"{WEBHOOK_URL}/webhook",
+        url_path="/webhook",
+    )
+
 if __name__ == "__main__":
     main()
