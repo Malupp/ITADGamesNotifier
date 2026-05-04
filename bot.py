@@ -3,6 +3,9 @@ import logging
 import requests
 import psycopg2
 import psycopg2.extras
+
+import threading
+from http.server import BaseHTTPRequestHandler, HTTPServer
 from dotenv import load_dotenv
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import (
@@ -382,10 +385,29 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
         else:
             await query.edit_message_text("❌ Gioco non trovato nella wishlist.")
 
+
+class HealthHandler(BaseHTTPRequestHandler):
+    def do_GET(self):
+        self.send_response(200)
+        self.send_header("Content-Type", "text/plain; charset=utf-8")
+        self.end_headers()
+        self.wfile.write(b"OK")
+
+    def log_message(self, format, *args):
+        return
+
+
+def start_health_server():
+    port = int(os.getenv("PORT", "10000"))
+    server = HTTPServer(("0.0.0.0", port), HealthHandler)
+    threading.Thread(target=server.serve_forever, daemon=True).start()
+    logging.info(f"Health server listening on 0.0.0.0:{port}")
+
 # ─── AVVIO ────────────────────────────────────────────────────────────────────
 
 def main():
     init_db()
+    start_health_server()
     app = ApplicationBuilder().token(BOT_TOKEN).build()
 
     app.add_handler(CommandHandler("start",    cmd_start))
@@ -398,7 +420,7 @@ def main():
     app.add_handler(CallbackQueryHandler(handle_callback))
 
     print("✅ Bot avviato...")
-    app.run_polling()
+    app.run_polling(drop_pending_updates=True)
 
 if __name__ == "__main__":
     main()
