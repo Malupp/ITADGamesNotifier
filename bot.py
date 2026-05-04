@@ -77,14 +77,14 @@ def get_free_games_now() -> list:
 
 # ─── WISHLIST HELPERS ─────────────────────────────────────────────────────────
 
-def wishlist_add(user_id: int, username: str, slug: str, title: str) -> bool:
+def wishlist_add(user_id: int, username: str, slug: str, title: str, price: float = None) -> bool:
     db = get_db()
     cursor = db.cursor()
     try:
         cursor.execute(
-            """INSERT INTO itad_wishlist (user_id, username, game_slug, game_title)
-               VALUES (%s, %s, %s, %s)""",
-            (user_id, username, slug, title)
+            """INSERT INTO itad_wishlist (user_id, username, game_slug, game_title, price_at_add, last_notified_price)
+               VALUES (%s, %s, %s, %s, %s, %s)""",
+            (user_id, username, slug, title, price, price)
         )
         db.commit()
         return True
@@ -309,23 +309,59 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
             "\n".join(lines), parse_mode="HTML", disable_web_page_preview=True
         )
 
+
     elif action == "addwish":
-        idx  = parts[1]
+
+        idx = parts[1]
+
         game = context.user_data.get("add_results", {}).get(idx)
+
         if not game:
             await query.edit_message_text("❌ Sessione scaduta, rifai /add.")
+
             return
 
-        user  = query.from_user
-        added = wishlist_add(user.id, user.username or user.first_name, game["id"], game["title"])
+        # Recupera il prezzo attuale
+
+        current_price = None
+
+        try:
+
+            prices_data = get_game_prices([game["id"]])
+
+            game_data = prices_data.get(game["id"])
+
+            if game_data and game_data.get("deals"):
+                best = min(game_data["deals"], key=lambda x: x["price"]["amount"])
+
+                current_price = best["price"]["amount"]
+
+        except:
+
+            pass
+
+        user = query.from_user
+
+        added = wishlist_add(user.id, user.username or user.first_name, game["id"], game["title"], current_price)
+
+        price_str = f" (prezzo attuale: €{current_price})" if current_price is not None else ""
 
         if added:
+
             await query.edit_message_text(
-                f"✅ <b>{game['title']}</b> aggiunto alla wishlist!", parse_mode="HTML"
+
+                f"✅ <b>{game['title']}</b> aggiunto alla wishlist{price_str}!\n"
+
+                f"🔔 Ti avviserò se il prezzo scende.", parse_mode="HTML"
+
             )
+
         else:
+
             await query.edit_message_text(
+
                 f"ℹ️ <b>{game['title']}</b> è già nella tua wishlist.", parse_mode="HTML"
+
             )
 
     elif action == "remwish":

@@ -23,12 +23,19 @@ jobs:
       - name: Install dependencies
         run: pip install -r requirements.txt
 
-      - name: Run script
+      - name: Check free games
         env:
           TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
           TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
           ITAD_API_KEY: ${{ secrets.ITAD_API_KEY }}
         run: python main.py
+
+      - name: Check wishlist prices
+        env:
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          ITAD_API_KEY: ${{ secrets.ITAD_API_KEY }}
+          DATABASE_URL: ${{ secrets.DATABASE_URL }}
+        run: python check_wishlist.py
 
       - name: Commit updated state
         run: |
