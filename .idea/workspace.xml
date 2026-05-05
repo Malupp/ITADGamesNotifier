@@ -5,7 +5,7 @@
   </component>
   <component name="ChangeListManager">
     <list default="true" id="8fe66191-3ca2-4041-b00d-a7a76cd40c2c" name="Changes" comment="updated project">
-      <change beforePath="$PROJECT_DIR$/check_wishlist.py" beforeDir="false" afterPath="$PROJECT_DIR$/check_wishlist.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/.idea/workspace.xml" beforeDir="false" afterPath="$PROJECT_DIR$/.idea/workspace.xml" afterDir="false" />
     </list>
     <option name="SHOW_DIALOG" value="false" />
     <option name="HIGHLIGHT_CONFLICTS" value="true" />
@@ -206,7 +206,15 @@
       <option name="project" value="LOCAL" />
       <updated>1777976580215</updated>
     </task>
-    <option name="localTasksCounter" value="19" />
+    <task id="LOCAL-00019" summary="updated project">
+      <option name="closed" value="true" />
+      <created>1777977144313</created>
+      <option name="number" value="00019" />
+      <option name="presentableId" value="LOCAL-00019" />
+      <option name="project" value="LOCAL" />
+      <updated>1777977144313</updated>
+    </task>
+    <option name="localTasksCounter" value="20" />
     <servers />
   </component>
   <component name="Vcs.Log.Tabs.Properties">

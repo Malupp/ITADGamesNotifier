@@ -18,16 +18,17 @@ DATABASE_URL = os.getenv("DATABASE_URL")
 logging.basicConfig(level=logging.INFO)
 
 TRACKED_SHOPS = {
-    4: "GamersGate",
-    6: "Green Man Gaming",
-    16: "GameBillet",
+    6: "Fanatical",
+    16: "Epic Games Store",
+    24: "GamersGate",
     35: "GOG",
-    36: "Humble Store",
-    37: "IndieGala",
-    48: "Fanatical",
-    52: "Gamesplanet",
+    36: "GreenManGaming",
+    37: "Humble Store",
+    42: "IndieGala",
+    48: "Microsoft Store",
+    52: "EA Store",
     61: "Steam",
-    62: "Epic Games Store",
+    62: "Ubisoft Store",
 }
 
 
