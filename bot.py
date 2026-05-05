@@ -1,5 +1,4 @@
 import os
-import json
 import logging
 import requests
 import psycopg2
@@ -15,8 +14,6 @@ load_dotenv()
 BOT_TOKEN    = os.getenv("TELEGRAM_BOT_TOKEN")
 ITAD_API_KEY = os.getenv("ITAD_API_KEY")
 DATABASE_URL = os.getenv("DATABASE_URL")
-WEBHOOK_URL  = os.getenv("WEBHOOK_URL")  # es. https://itad-bot-xxxx.onrender.com
-PORT         = int(os.getenv("PORT", "10000"))
 
 logging.basicConfig(level=logging.INFO)
 
@@ -422,15 +419,7 @@ def main():
     app.add_handler(CallbackQueryHandler(handle_callback))
 
     print("✅ Bot avviato...")
-
-    app.run_webhook(
-        listen="0.0.0.0",
-        port=PORT,
-        url_path="/webhook",
-        webhook_url=f"{WEBHOOK_URL}/webhook",
-        drop_pending_updates=True,
-    )
-
+    app.run_polling(drop_pending_updates=True)
 
 if __name__ == "__main__":
     main()
