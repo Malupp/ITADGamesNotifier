@@ -261,6 +261,27 @@ def parse_shop_names(raw_values: list) -> set:
 
     return resolved
 
+def parse_price_filter(value: str):
+    """
+    Supporta:
+    - soglia massima: "10"
+    - range: "5-20"
+    Ritorna tuple (min_price, max_price)
+    """
+    cleaned = value.strip().replace(",", ".")
+    if "-" in cleaned:
+        left, right = cleaned.split("-", 1)
+        min_price = float(left.strip())
+        max_price = float(right.strip())
+        if min_price < 0 or max_price <= 0 or min_price > max_price:
+            raise ValueError("range prezzo non valido")
+        return min_price, max_price
+
+    max_price = float(cleaned)
+    if max_price <= 0:
+        raise ValueError("soglia prezzo non valida")
+    return 0.0, max_price
+
 def filter_deals_by_shop_ids(deals: list, shop_ids: set) -> list:
     filtered = []
     for deal in deals:
@@ -284,9 +305,10 @@ async def cmd_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "/remove — rimuovi un gioco dalla wishlist\n"
         "/offerte [prezzo] [sconto%] [score] — offerte filtrate\n"
         "  <i>└ es. /offerte 10 50 70</i>\n"
-        "/offerte_shop [prezzo] [sconto%] [score] [shop...] — migliore offerta per piattaforma\n"
-        "  <i>└ es. /offerte_shop 20 50 70 steam epic games store</i>\n"
-        "  <i>└ es. /offerte_shop 20 50 70 steam,gog,fanatical</i>\n"
+        "/offerte_shop [prezzo o range] [shop...] — migliore offerta per piattaforma\n"
+        "  <i>└ es. /offerte_shop 10 steam epic games store</i>\n"
+        "  <i>└ es. /offerte_shop 5-20 steam,gog,fanatical</i>\n"
+        "  <i>└ es. /offerte_shop steam,epic games store (usa la soglia default)</i>\n"
         "/confronta &lt;titolo&gt; — confronta i prezzi su tutte le piattaforme monitorate\n"
         "/setsoglia prezzo|sconto|review &lt;valore&gt; — imposta i tuoi filtri\n"
         "/help — mostra questo messaggio\n\n"
@@ -529,33 +551,50 @@ async def cmd_offerte(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 async def cmd_offerte_shop(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """
-    /offerte_shop [prezzo] [sconto%] [score] [shop ...]
+    /offerte_shop [prezzo o range] [shop ...]
     Esempi:
-      /offerte_shop 20 50 70 steam epic games store
-      /offerte_shop 20 50 70 steam,gog,fanatical
+      /offerte_shop 10 steam epic games store
+      /offerte_shop 5-20 steam,gog,fanatical
+      /offerte_shop steam,epic games store
     """
     args = context.args or []
-    try:
-        threshold = float(args[0].replace(",", ".")) if len(args) >= 1 else 20.0
-        min_cut = int(args[1]) if len(args) >= 2 else 0
-        min_score = int(args[2]) if len(args) >= 3 else 0
-        shop_ids = parse_shop_names(args[3:]) if len(args) >= 4 else set(TRACKED_SHOPS.keys())
-    except ValueError:
+    prefs = get_user_deal_prefs(update.effective_user.id)
+    min_cut = prefs["min_cut"]
+    min_score = prefs["min_score"]
+    min_price = 0.0
+    max_price = prefs["threshold"] if prefs["threshold"] > 0 else 20.0
+    shop_tokens = args
+
+    if args:
+        first = args[0]
+        if any(ch.isdigit() for ch in first):
+            try:
+                min_price, max_price = parse_price_filter(first)
+                shop_tokens = args[1:]
+            except ValueError:
+                await update.message.reply_text(
+                    "❌ Formato prezzo non valido. Usa ad esempio:\n"
+                    "/offerte_shop 10 steam epic games store\n"
+                    "/offerte_shop 5-20 steam,gog"
+                )
+                return
+
+    shop_ids = parse_shop_names(shop_tokens) if shop_tokens else set(TRACKED_SHOPS.keys())
+    if not shop_ids:
         await update.message.reply_text(
-            "❌ Uso: /offerte_shop [prezzo] [sconto%] [score] [shop ...]\n"
+            "❌ Uso: /offerte_shop [prezzo o range] [shop ...]\n"
             "Esempi:\n"
-            "/offerte_shop 20 50 70 steam epic games store\n"
-            "/offerte_shop 20 50 70 steam,gog,fanatical"
+            "/offerte_shop 10 steam epic games store\n"
+            "/offerte_shop 5-20 steam,gog,fanatical\n"
+            "/offerte_shop steam,epic games store"
         )
         return
 
-    if not shop_ids:
-        nomi = ", ".join(TRACKED_SHOPS.values())
-        await update.message.reply_text(f"❌ Nessuno shop valido.\nShop supportati: {nomi}")
-        return
-
-    deals = get_deals_under_price(threshold, min_cut=min_cut, min_score=min_score, limit=50)
-    deals = filter_deals_by_shop_ids(deals, shop_ids)
+    deals = get_deals_under_price(max_price, min_cut=min_cut, min_score=min_score, limit=100)
+    deals = [
+        d for d in filter_deals_by_shop_ids(deals, shop_ids)
+        if min_price <= d.get("deal", {}).get("price", {}).get("amount", 0) <= max_price
+    ]
 
     if not deals:
         await update.message.reply_text("😔 Nessuna offerta trovata con i filtri selezionati.")
@@ -569,7 +608,7 @@ async def cmd_offerte_shop(update: Update, context: ContextTypes.DEFAULT_TYPE):
         if sid not in best_by_shop or price < best_by_shop[sid].get("deal", {}).get("price", {}).get("amount", 999999):
             best_by_shop[sid] = deal
 
-    lines = ["🏷 <b>Migliori sconti per piattaforma:</b>\n"]
+    lines = [f"🏷 <b>Migliori sconti per piattaforma</b> (range €{min_price}-€{max_price}):\n"]
     for sid in sorted(best_by_shop.keys()):
         deal = best_by_shop[sid]
         title = deal.get("title", "?")
