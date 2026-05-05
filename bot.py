@@ -68,6 +68,40 @@ def set_user_threshold(user_id: int, username: str, threshold: float):
     cursor.close()
     db.close()
 
+def get_user_deal_prefs(user_id: int) -> dict:
+    db = get_db()
+    cursor = db.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
+    cursor.execute(
+        "SELECT price_threshold, min_cut, min_score FROM itad_user_prefs WHERE user_id=%s",
+        (user_id,)
+    )
+    row = cursor.fetchone()
+    cursor.close()
+    db.close()
+    return {
+        "threshold": float(row["price_threshold"]) if row and row["price_threshold"] else 5.00,
+        "min_cut":   int(row["min_cut"])            if row and row["min_cut"]           else 0,
+        "min_score": int(row["min_score"])          if row and row["min_score"]         else 0,
+    }
+
+def set_user_deal_prefs(user_id: int, username: str, threshold: float = None, min_cut: int = None, min_score: int = None):
+    db = get_db()
+    cursor = db.cursor()
+    cursor.execute(
+        """INSERT INTO itad_user_prefs (user_id, username, price_threshold, min_cut, min_score)
+           VALUES (%s, %s, %s, %s, %s)
+           ON CONFLICT (user_id) DO UPDATE SET
+               username        = EXCLUDED.username,
+               price_threshold = COALESCE(%s, itad_user_prefs.price_threshold),
+               min_cut         = COALESCE(%s, itad_user_prefs.min_cut),
+               min_score       = COALESCE(%s, itad_user_prefs.min_score)""",
+        (user_id, username,
+         threshold or 5.00, min_cut or 0, min_score or 0,
+         threshold, min_cut, min_score)
+    )
+    db.commit()
+    cursor.close()
+    db.close()
 
 # ─── WISHLIST HELPERS ─────────────────────────────────────────────────────────
 
@@ -149,14 +183,14 @@ def get_free_games_now() -> list:
         if d.get("deal", {}).get("price", {}).get("amount") == 0
     ]
 
-def get_deals_under_price(max_price: float, limit: int = 10) -> list:
+def get_deals_under_price(max_price: float, min_cut: int = 0, min_score: int = 0, limit: int = 10) -> list:
     response = requests.get(
         "https://api.isthereanydeal.com/deals/v2",
         params={
             "key": ITAD_API_KEY,
             "country": "IT",
-            "limit": 20,
-            "sort": "price",
+            "limit": 50,  # prendiamo più risultati per poi filtrare
+            "sort": "rank",
         }
     )
     response.raise_for_status()
@@ -165,8 +199,25 @@ def get_deals_under_price(max_price: float, limit: int = 10) -> list:
     results = []
     for deal in data.get("list", []):
         price = deal.get("deal", {}).get("price", {}).get("amount")
-        if price is not None and 0 < price <= max_price:
-            results.append(deal)
+        cut   = deal.get("deal", {}).get("cut", 0)
+
+        # Filtro prezzo e sconto
+        if price is None or price <= 0 or price > max_price:
+            continue
+        if cut < min_cut:
+            continue
+
+        # Filtro review score Steam
+        reviews     = deal.get("reviews") or {}
+        steam       = reviews.get("steam") or {}
+        steam_score = steam.get("score")
+
+        if min_score > 0 and (steam_score is None or steam_score < min_score):
+            continue
+
+        deal["_steam_score"] = steam_score  # salviamo per mostrarlo nel messaggio
+        results.append(deal)
+
         if len(results) >= limit:
             break
 
@@ -184,9 +235,9 @@ async def cmd_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "/add &lt;titolo&gt; — aggiungi un gioco alla wishlist\n"
         "  <i>└ ti avviso automaticamente se il prezzo scende!</i>\n"
         "/remove — rimuovi un gioco dalla wishlist\n"
-        "/offerte [prezzo] — offerte sotto una soglia di prezzo\n"
-        "  <i>└ es. /offerte 10 oppure /offerte per usare la tua soglia</i>\n"
-        "/setsoglia &lt;prezzo&gt; — imposta la tua soglia preferita\n"
+        "/offerte [prezzo] [sconto%] [score] — offerte filtrate\n"
+        "  <i>└ es. /offerte 10 50 70</i>\n"
+        "/setsoglia prezzo|sconto|review &lt;valore&gt; — imposta i tuoi filtri\n"
         "/help — mostra questo messaggio\n\n"
         "🔔 <b>Monitoraggio prezzi automatico:</b>\n"
         "Ogni ora controllo i prezzi dei giochi nella tua wishlist. "
@@ -346,54 +397,78 @@ async def cmd_wishlist(update: Update, context: ContextTypes.DEFAULT_TYPE):
 async def cmd_offerte(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id  = update.effective_user.id
     username = update.effective_user.username or update.effective_user.first_name
+    prefs    = get_user_deal_prefs(user_id)
 
-    # Soglia da argomento o da preferenze utente
-    if context.args:
-        try:
-            threshold = float(context.args[0].replace(",", "."))
-            if threshold <= 0:
-                await update.message.reply_text("❌ La soglia deve essere maggiore di 0.")
-                return
-        except ValueError:
-            await update.message.reply_text("❌ Uso: /offerte <prezzo> — es. /offerte 10")
-            return
-    else:
-        threshold = get_user_threshold(user_id)
+    # Parsing argomenti: /offerte [prezzo] [sconto%] [score]
+    threshold = prefs["threshold"]
+    min_cut   = prefs["min_cut"]
+    min_score = prefs["min_score"]
+
+    args = context.args or []
+    try:
+        if len(args) >= 1:
+            threshold = float(args[0].replace(",", "."))
+        if len(args) >= 2:
+            min_cut = int(args[1])
+        if len(args) >= 3:
+            min_score = int(args[2])
+    except ValueError:
+        await update.message.reply_text(
+            "❌ Uso: /offerte [prezzo] [sconto%] [score]\n"
+            "Es: /offerte 10 50 70\n"
+            "    prezzo massimo €10, sconto min 50%, review min 70"
+        )
+        return
+
+    filtri = []
+    if min_cut   > 0: filtri.append(f"sconto ≥{min_cut}%")
+    if min_score > 0: filtri.append(f"review ≥{min_score}")
+    filtri_str = " — ".join(filtri) if filtri else "nessun filtro aggiuntivo"
 
     await update.message.reply_text(
-        f"🔍 Cerco offerte sotto €{threshold}...", parse_mode="HTML"
+        f"🔍 Cerco offerte sotto €{threshold} ({filtri_str})...",
+        parse_mode="HTML"
     )
 
-    deals = get_deals_under_price(threshold, limit=10)
+    deals = get_deals_under_price(threshold, min_cut=min_cut, min_score=min_score, limit=5)
 
     if not deals:
         await update.message.reply_text(
-            f"😔 Nessuna offerta trovata sotto €{threshold} al momento."
+            f"😔 Nessuna offerta trovata con questi filtri.\n"
+            f"Prova ad alzare il prezzo o abbassare i requisiti."
         )
         return
 
     lines = [f"🏷 <b>Offerte sotto €{threshold}:</b>\n"]
 
     for deal in deals:
-        title   = deal.get("title", "?")
-        shop    = deal.get("deal", {}).get("shop", {}).get("name", "?")
-        price   = deal.get("deal", {}).get("price", {}).get("amount")
-        regular = deal.get("deal", {}).get("regular", {}).get("amount")
-        cut     = deal.get("deal", {}).get("cut", 0)
-        url     = deal.get("deal", {}).get("url", "")
-        expiry  = deal.get("deal", {}).get("expiry")
+        title       = deal.get("title", "?")
+        shop        = deal.get("deal", {}).get("shop", {}).get("name", "?")
+        price       = deal.get("deal", {}).get("price", {}).get("amount")
+        regular     = deal.get("deal", {}).get("regular", {}).get("amount")
+        cut         = deal.get("deal", {}).get("cut", 0)
+        url         = deal.get("deal", {}).get("url", "")
+        expiry      = deal.get("deal", {}).get("expiry")
+        steam_score = deal.get("_steam_score")
 
-        cut_str    = f" (-{cut}%)" if cut > 0 else ""
-        price_str  = f"<s>€{regular}</s> → <b>€{price}</b>{cut_str}" if regular else f"<b>€{price}</b>{cut_str}"
-        expiry_str = f" — scade il {expiry[:10]}" if expiry else ""
+        price_str  = f"<s>€{regular}</s> → <b>€{price}</b> (-{cut}%)" if regular else f"<b>€{price}</b> (-{cut}%)"
+        score_str  = f"⭐ {steam_score}%" if steam_score is not None else ""
+        expiry_str = f"⏳ scade il {expiry[:10]}" if expiry else ""
+
+        meta = " — ".join(filter(None, [score_str, expiry_str]))
+        meta_line = f"\n   {meta}" if meta else ""
 
         lines.append(
             f"🎮 <b>{title}</b>\n"
-            f"   🏪 {shop} — {price_str}{expiry_str}\n"
+            f"   🏪 {shop} — {price_str}"
+            f"{meta_line}\n"
             f"   🔗 <a href='{url}'>link</a>\n"
         )
 
-    lines.append(f"<i>Soglia attiva: €{threshold} — cambiala con /setsoglia</i>")
+    lines.append(
+        f"<i>Filtri: €{threshold} | sconto ≥{min_cut}% | review ≥{min_score}\n"
+        f"Cambia i default con /setsoglia</i>"
+    )
 
     await update.message.reply_text(
         "\n".join(lines),
@@ -404,36 +479,66 @@ async def cmd_offerte(update: Update, context: ContextTypes.DEFAULT_TYPE):
 async def cmd_setsoglia(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id  = update.effective_user.id
     username = update.effective_user.username or update.effective_user.first_name
+    prefs    = get_user_deal_prefs(user_id)
 
     if not context.args:
-        current = get_user_threshold(user_id)
         await update.message.reply_text(
-            f"💰 La tua soglia attuale è <b>€{current}</b>\n\n"
-            f"Per cambiarla usa: /setsoglia &lt;prezzo&gt;\n"
-            f"Es. /setsoglia 15",
+            f"⚙️ <b>Le tue preferenze offerte:</b>\n\n"
+            f"💰 Prezzo massimo: <b>€{prefs['threshold']}</b>\n"
+            f"✂️ Sconto minimo: <b>{prefs['min_cut']}%</b>\n"
+            f"⭐ Review minima: <b>{prefs['min_score']}</b>\n\n"
+            f"<b>Come aggiornare:</b>\n"
+            f"/setsoglia prezzo 15\n"
+            f"/setsoglia sconto 50\n"
+            f"/setsoglia review 70",
             parse_mode="HTML"
         )
         return
 
-    try:
-        threshold = float(context.args[0].replace(",", "."))
-        if threshold <= 0:
-            await update.message.reply_text("❌ La soglia deve essere maggiore di 0.")
-            return
-        if threshold > 100:
-            await update.message.reply_text("❌ La soglia massima è €100.")
-            return
-    except ValueError:
-        await update.message.reply_text("❌ Uso: /setsoglia <prezzo> — es. /setsoglia 15")
+    if len(context.args) < 2:
+        await update.message.reply_text(
+            "❌ Uso:\n"
+            "/setsoglia prezzo 15\n"
+            "/setsoglia sconto 50\n"
+            "/setsoglia review 70"
+        )
         return
 
-    set_user_threshold(user_id, username, threshold)
+    campo  = context.args[0].lower()
+    valore = context.args[1].replace(",", ".")
 
-    await update.message.reply_text(
-        f"✅ Soglia aggiornata a <b>€{threshold}</b>!\n"
-        f"Usa /offerte per vedere i deal sotto questa soglia.",
-        parse_mode="HTML"
-    )
+    try:
+        if campo == "prezzo":
+            v = float(valore)
+            if v <= 0 or v > 100:
+                await update.message.reply_text("❌ Il prezzo deve essere tra 0 e 100.")
+                return
+            set_user_deal_prefs(user_id, username, threshold=v)
+            await update.message.reply_text(f"✅ Prezzo massimo impostato a <b>€{v}</b>", parse_mode="HTML")
+
+        elif campo == "sconto":
+            v = int(float(valore))
+            if v < 0 or v > 100:
+                await update.message.reply_text("❌ Lo sconto deve essere tra 0 e 100.")
+                return
+            set_user_deal_prefs(user_id, username, min_cut=v)
+            await update.message.reply_text(f"✅ Sconto minimo impostato a <b>{v}%</b>", parse_mode="HTML")
+
+        elif campo == "review":
+            v = int(float(valore))
+            if v < 0 or v > 100:
+                await update.message.reply_text("❌ Il review score deve essere tra 0 e 100.")
+                return
+            set_user_deal_prefs(user_id, username, min_score=v)
+            await update.message.reply_text(f"✅ Review minima impostata a <b>{v}</b>", parse_mode="HTML")
+
+        else:
+            await update.message.reply_text(
+                "❌ Campo non riconosciuto. Usa: prezzo, sconto, oppure review"
+            )
+
+    except ValueError:
+        await update.message.reply_text("❌ Valore non valido.")
 
 # ─── CALLBACK BUTTONS ────────────────────────────────────────────────────────
 
