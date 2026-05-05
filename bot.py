@@ -203,7 +203,7 @@ def get_deals_under_price(max_price: float, min_cut: int = 0, min_score: int = 0
         params={
             "key": ITAD_API_KEY,
             "country": "IT",
-            "limit": fetch_limit if fetch_limit else max(50, min(limit * 10, 500)),
+            "limit": max(1, min(fetch_limit, 100)) if fetch_limit else max(20, min(limit * 5, 100)),
             "sort": "rank",
         }
     )
@@ -596,13 +596,17 @@ async def cmd_offerte_shop(update: Update, context: ContextTypes.DEFAULT_TYPE):
         )
         return
 
-    deals = get_deals_under_price(
-        max_price,
-        min_cut=min_cut,
-        min_score=min_score,
-        limit=max(100, result_limit),
-        fetch_limit=max(200, min(result_limit * 40, 500))
-    )
+    try:
+        deals = get_deals_under_price(
+            max_price,
+            min_cut=min_cut,
+            min_score=min_score,
+            limit=max(30, result_limit),
+            fetch_limit=max(30, min(result_limit * 5, 100))
+        )
+    except requests.RequestException:
+        await update.message.reply_text("❌ Errore temporaneo nel recupero offerte ITAD. Riprova tra poco.")
+        return
     deals = [
         d for d in filter_deals_by_shop_ids(deals, shop_ids)
         if min_price <= d.get("deal", {}).get("price", {}).get("amount", 0) <= max_price
