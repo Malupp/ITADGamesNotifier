@@ -53,6 +53,14 @@ def init_db():
             UNIQUE (user_id, game_slug)
         )
     """)
+    cursor.execute("""
+        ALTER TABLE itad_wishlist
+        ADD COLUMN IF NOT EXISTS last_notified_shop VARCHAR(255) DEFAULT NULL
+    """)
+    cursor.execute("""
+        ALTER TABLE itad_wishlist
+        ADD COLUMN IF NOT EXISTS last_notified_url TEXT DEFAULT NULL
+    """)
     db.commit()
     cursor.close()
     db.close()
@@ -119,14 +127,17 @@ def set_user_deal_prefs(user_id: int, username: str, threshold: float = None, mi
 
 # ─── WISHLIST HELPERS ─────────────────────────────────────────────────────────
 
-def wishlist_add(user_id: int, username: str, slug: str, title: str, price: float = None) -> bool:
+def wishlist_add(user_id: int, username: str, slug: str, title: str, price: float = None, shop: str = None, url: str = None) -> bool:
     db = get_db()
     cursor = db.cursor()
     try:
         cursor.execute(
-            """INSERT INTO itad_wishlist (user_id, username, game_slug, game_title, price_at_add, last_notified_price)
-               VALUES (%s, %s, %s, %s, %s, %s)""",
-            (user_id, username, slug, title, price, price)
+            """INSERT INTO itad_wishlist (
+                   user_id, username, game_slug, game_title,
+                   price_at_add, last_notified_price, last_notified_shop, last_notified_url
+               )
+               VALUES (%s, %s, %s, %s, %s, %s, %s, %s)""",
+            (user_id, username, slug, title, price, price, shop, url)
         )
         db.commit()
         return True
@@ -811,12 +822,16 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
         # Recupera prezzo attuale
         current_price = None
+        current_shop = None
+        current_url = None
         try:
             prices_data = get_game_prices([game["id"]])
             game_data   = prices_data.get(game["id"])
             if game_data and game_data.get("deals"):
                 best          = min(game_data["deals"], key=lambda x: x["price"]["amount"])
                 current_price = best["price"]["amount"]
+                current_shop  = best.get("shop", {}).get("name")
+                current_url   = best.get("url")
         except:
             pass
 
@@ -826,7 +841,9 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
             user.username or user.first_name,
             game["id"],
             game["title"],
-            current_price
+            current_price,
+            current_shop,
+            current_url
         )
 
         price_str = f" (prezzo attuale: €{current_price})" if current_price is not None else ""
