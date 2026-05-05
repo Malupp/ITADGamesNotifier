@@ -236,22 +236,28 @@ def get_deals_under_price(max_price: float, min_cut: int = 0, min_score: int = 0
 
     return results
 
-def normalize_shop_ids(raw_values: list) -> set:
-    """Converte una lista di ID o nomi shop in un set di ID validi."""
+def parse_shop_names(raw_values: list) -> set:
+    """
+    Accetta nomi shop separati da spazio o virgola.
+    Esempi:
+      /offerte_shop 20 50 70 steam epic games store
+      /offerte_shop 20 50 70 steam,gog,fanatical
+    """
     if not raw_values:
         return set(TRACKED_SHOPS.keys())
 
     by_name = {name.lower(): sid for sid, name in TRACKED_SHOPS.items()}
+    text = " ".join(raw_values).replace(",", " ").strip().lower()
+    if not text:
+        return set(TRACKED_SHOPS.keys())
+
     resolved = set()
 
-    for value in raw_values:
-        cleaned = value.strip().lower()
-        if cleaned.isdigit():
-            sid = int(cleaned)
-            if sid in TRACKED_SHOPS:
-                resolved.add(sid)
-        elif cleaned in by_name:
-            resolved.add(by_name[cleaned])
+    # Match nomi lunghi prima (es. "epic games store", "green man gaming")
+    for name in sorted(by_name.keys(), key=len, reverse=True):
+        if name in text:
+            resolved.add(by_name[name])
+            text = text.replace(name, " ")
 
     return resolved
 
@@ -278,8 +284,9 @@ async def cmd_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "/remove — rimuovi un gioco dalla wishlist\n"
         "/offerte [prezzo] [sconto%] [score] — offerte filtrate\n"
         "  <i>└ es. /offerte 10 50 70</i>\n"
-        "/offerte_shop [prezzo] [sconto%] [score] [shop_id...] — migliore offerta per piattaforma\n"
-        "  <i>└ es. /offerte_shop 20 50 70 61 62</i>\n"
+        "/offerte_shop [prezzo] [sconto%] [score] [shop...] — migliore offerta per piattaforma\n"
+        "  <i>└ es. /offerte_shop 20 50 70 steam epic games store</i>\n"
+        "  <i>└ es. /offerte_shop 20 50 70 steam,gog,fanatical</i>\n"
         "/confronta &lt;titolo&gt; — confronta i prezzi su tutte le piattaforme monitorate\n"
         "/setsoglia prezzo|sconto|review &lt;valore&gt; — imposta i tuoi filtri\n"
         "/help — mostra questo messaggio\n\n"
@@ -522,24 +529,29 @@ async def cmd_offerte(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 async def cmd_offerte_shop(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """
-    /offerte_shop [prezzo] [sconto%] [score] [shop_id ...]
-    Esempio: /offerte_shop 20 50 70 61 62
+    /offerte_shop [prezzo] [sconto%] [score] [shop ...]
+    Esempi:
+      /offerte_shop 20 50 70 steam epic games store
+      /offerte_shop 20 50 70 steam,gog,fanatical
     """
     args = context.args or []
     try:
         threshold = float(args[0].replace(",", ".")) if len(args) >= 1 else 20.0
         min_cut = int(args[1]) if len(args) >= 2 else 0
         min_score = int(args[2]) if len(args) >= 3 else 0
-        shop_ids = normalize_shop_ids(args[3:]) if len(args) >= 4 else set(TRACKED_SHOPS.keys())
+        shop_ids = parse_shop_names(args[3:]) if len(args) >= 4 else set(TRACKED_SHOPS.keys())
     except ValueError:
         await update.message.reply_text(
-            "❌ Uso: /offerte_shop [prezzo] [sconto%] [score] [shop_id ...]\n"
-            "Esempio: /offerte_shop 20 50 70 61 62"
+            "❌ Uso: /offerte_shop [prezzo] [sconto%] [score] [shop ...]\n"
+            "Esempi:\n"
+            "/offerte_shop 20 50 70 steam epic games store\n"
+            "/offerte_shop 20 50 70 steam,gog,fanatical"
         )
         return
 
     if not shop_ids:
-        await update.message.reply_text("❌ Nessuno shop valido. Usa ID tra: 4,6,16,35,36,37,48,52,61,62")
+        nomi = ", ".join(TRACKED_SHOPS.values())
+        await update.message.reply_text(f"❌ Nessuno shop valido.\nShop supportati: {nomi}")
         return
 
     deals = get_deals_under_price(threshold, min_cut=min_cut, min_score=min_score, limit=50)
