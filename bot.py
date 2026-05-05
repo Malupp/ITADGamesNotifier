@@ -17,6 +17,19 @@ DATABASE_URL = os.getenv("DATABASE_URL")
 
 logging.basicConfig(level=logging.INFO)
 
+TRACKED_SHOPS = {
+    4: "GamersGate",
+    6: "Green Man Gaming",
+    16: "GameBillet",
+    35: "GOG",
+    36: "Humble Store",
+    37: "IndieGala",
+    48: "Fanatical",
+    52: "Gamesplanet",
+    61: "Steam",
+    62: "Epic Games Store",
+}
+
 
 # ─── DATABASE ────────────────────────────────────────────────────────────────
 
@@ -223,6 +236,40 @@ def get_deals_under_price(max_price: float, min_cut: int = 0, min_score: int = 0
 
     return results
 
+def parse_shop_names(raw_values: list) -> set:
+    """
+    Accetta nomi shop separati da spazio o virgola.
+    Esempi:
+      /offerte_shop 20 50 70 steam epic games store
+      /offerte_shop 20 50 70 steam,gog,fanatical
+    """
+    if not raw_values:
+        return set(TRACKED_SHOPS.keys())
+
+    by_name = {name.lower(): sid for sid, name in TRACKED_SHOPS.items()}
+    text = " ".join(raw_values).replace(",", " ").strip().lower()
+    if not text:
+        return set(TRACKED_SHOPS.keys())
+
+    resolved = set()
+
+    # Match nomi lunghi prima (es. "epic games store", "green man gaming")
+    for name in sorted(by_name.keys(), key=len, reverse=True):
+        if name in text:
+            resolved.add(by_name[name])
+            text = text.replace(name, " ")
+
+    return resolved
+
+def filter_deals_by_shop_ids(deals: list, shop_ids: set) -> list:
+    filtered = []
+    for deal in deals:
+        shop = deal.get("deal", {}).get("shop", {})
+        shop_id = shop.get("id")
+        if shop_id in shop_ids:
+            filtered.append(deal)
+    return filtered
+
 # ─── COMANDI ──────────────────────────────────────────────────────────────────
 
 async def cmd_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -237,6 +284,10 @@ async def cmd_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "/remove — rimuovi un gioco dalla wishlist\n"
         "/offerte [prezzo] [sconto%] [score] — offerte filtrate\n"
         "  <i>└ es. /offerte 10 50 70</i>\n"
+        "/offerte_shop [prezzo] [sconto%] [score] [shop...] — migliore offerta per piattaforma\n"
+        "  <i>└ es. /offerte_shop 20 50 70 steam epic games store</i>\n"
+        "  <i>└ es. /offerte_shop 20 50 70 steam,gog,fanatical</i>\n"
+        "/confronta &lt;titolo&gt; — confronta i prezzi su tutte le piattaforme monitorate\n"
         "/setsoglia prezzo|sconto|review &lt;valore&gt; — imposta i tuoi filtri\n"
         "/help — mostra questo messaggio\n\n"
         "🔔 <b>Monitoraggio prezzi automatico:</b>\n"
@@ -476,6 +527,105 @@ async def cmd_offerte(update: Update, context: ContextTypes.DEFAULT_TYPE):
         disable_web_page_preview=True
     )
 
+async def cmd_offerte_shop(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """
+    /offerte_shop [prezzo] [sconto%] [score] [shop ...]
+    Esempi:
+      /offerte_shop 20 50 70 steam epic games store
+      /offerte_shop 20 50 70 steam,gog,fanatical
+    """
+    args = context.args or []
+    try:
+        threshold = float(args[0].replace(",", ".")) if len(args) >= 1 else 20.0
+        min_cut = int(args[1]) if len(args) >= 2 else 0
+        min_score = int(args[2]) if len(args) >= 3 else 0
+        shop_ids = parse_shop_names(args[3:]) if len(args) >= 4 else set(TRACKED_SHOPS.keys())
+    except ValueError:
+        await update.message.reply_text(
+            "❌ Uso: /offerte_shop [prezzo] [sconto%] [score] [shop ...]\n"
+            "Esempi:\n"
+            "/offerte_shop 20 50 70 steam epic games store\n"
+            "/offerte_shop 20 50 70 steam,gog,fanatical"
+        )
+        return
+
+    if not shop_ids:
+        nomi = ", ".join(TRACKED_SHOPS.values())
+        await update.message.reply_text(f"❌ Nessuno shop valido.\nShop supportati: {nomi}")
+        return
+
+    deals = get_deals_under_price(threshold, min_cut=min_cut, min_score=min_score, limit=50)
+    deals = filter_deals_by_shop_ids(deals, shop_ids)
+
+    if not deals:
+        await update.message.reply_text("😔 Nessuna offerta trovata con i filtri selezionati.")
+        return
+
+    best_by_shop = {}
+    for deal in deals:
+        shop = deal.get("deal", {}).get("shop", {})
+        sid = shop.get("id")
+        price = deal.get("deal", {}).get("price", {}).get("amount")
+        if sid not in best_by_shop or price < best_by_shop[sid].get("deal", {}).get("price", {}).get("amount", 999999):
+            best_by_shop[sid] = deal
+
+    lines = ["🏷 <b>Migliori sconti per piattaforma:</b>\n"]
+    for sid in sorted(best_by_shop.keys()):
+        deal = best_by_shop[sid]
+        title = deal.get("title", "?")
+        shop_name = TRACKED_SHOPS.get(sid, deal.get("deal", {}).get("shop", {}).get("name", "?"))
+        price = deal.get("deal", {}).get("price", {}).get("amount")
+        regular = deal.get("deal", {}).get("regular", {}).get("amount")
+        cut = deal.get("deal", {}).get("cut", 0)
+        url = deal.get("deal", {}).get("url", "")
+        price_str = f"<s>€{regular}</s> → <b>€{price}</b> (-{cut}%)" if regular else f"<b>€{price}</b> (-{cut}%)"
+        lines.append(f"🏪 <b>{shop_name}</b>\n🎮 {title}\n💰 {price_str}\n🔗 <a href='{url}'>link</a>\n")
+
+    await update.message.reply_text("\n".join(lines), parse_mode="HTML", disable_web_page_preview=True)
+
+async def cmd_confronta(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not context.args:
+        await update.message.reply_text("❌ Uso: /confronta <titolo gioco>")
+        return
+
+    query = " ".join(context.args)
+    results = search_games(query)
+    if not results:
+        await update.message.reply_text("😔 Nessun risultato trovato.")
+        return
+
+    game = results[0]
+    game_id = game["id"]
+    game_title = game["title"]
+    prices_data = get_game_prices([game_id])
+    game_data = prices_data.get(game_id)
+    if not game_data or not game_data.get("deals"):
+        await update.message.reply_text(f"😔 Nessun prezzo trovato per <b>{game_title}</b>.", parse_mode="HTML")
+        return
+
+    allowed_shop_ids = set(TRACKED_SHOPS.keys())
+    deals = [d for d in game_data["deals"] if d.get("shop", {}).get("id") in allowed_shop_ids]
+    if not deals:
+        await update.message.reply_text("😔 Nessun prezzo disponibile sulle piattaforme monitorate.")
+        return
+
+    best = min(deals, key=lambda x: x["price"]["amount"])
+    lines = [f"⚖️ <b>Confronto prezzi: {game_title}</b>\n"]
+    for deal in sorted(deals, key=lambda x: x["price"]["amount"]):
+        sid = deal.get("shop", {}).get("id")
+        shop = TRACKED_SHOPS.get(sid, deal.get("shop", {}).get("name", "?"))
+        price = deal.get("price", {}).get("amount", 0)
+        cut = deal.get("cut", 0)
+        url = deal.get("url", "")
+        lines.append(f"🏪 {shop}: <b>€{price}</b> (-{cut}%) — <a href='{url}'>link</a>")
+
+    best_sid = best.get("shop", {}).get("id")
+    best_shop = TRACKED_SHOPS.get(best_sid, best.get("shop", {}).get("name", "?"))
+    best_price = best.get("price", {}).get("amount", 0)
+    lines.append(f"\n🥇 <b>Prezzo più basso: {best_shop} a €{best_price}</b>")
+
+    await update.message.reply_text("\n".join(lines), parse_mode="HTML", disable_web_page_preview=True)
+
 async def cmd_setsoglia(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id  = update.effective_user.id
     username = update.effective_user.username or update.effective_user.first_name
@@ -663,6 +813,8 @@ def main():
     app.add_handler(CommandHandler("remove",   cmd_remove))
     app.add_handler(CommandHandler("wishlist", cmd_wishlist))
     app.add_handler(CommandHandler("offerte", cmd_offerte))
+    app.add_handler(CommandHandler("offerte_shop", cmd_offerte_shop))
+    app.add_handler(CommandHandler("confronta", cmd_confronta))
     app.add_handler(CommandHandler("setsoglia", cmd_setsoglia))
     app.add_handler(CallbackQueryHandler(handle_callback))
 
