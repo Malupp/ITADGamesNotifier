@@ -196,13 +196,13 @@ def get_free_games_now() -> list:
         if d.get("deal", {}).get("price", {}).get("amount") == 0
     ]
 
-def get_deals_under_price(max_price: float, min_cut: int = 0, min_score: int = 0, limit: int = 10) -> list:
+def get_deals_under_price(max_price: float, min_cut: int = 0, min_score: int = 0, limit: int = 10, fetch_limit: int = None) -> list:
     response = requests.get(
         "https://api.isthereanydeal.com/deals/v2",
         params={
             "key": ITAD_API_KEY,
             "country": "IT",
-            "limit": 50,  # prendiamo più risultati per poi filtrare
+            "limit": fetch_limit if fetch_limit else max(50, min(limit * 10, 500)),
             "sort": "rank",
         }
     )
@@ -553,8 +553,8 @@ async def cmd_offerte_shop(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """
     /offerte_shop [prezzo o range] [shop ...]
     Esempi:
-      /offerte_shop 10 steam epic games store
-      /offerte_shop 5-20 steam,gog,fanatical
+      /offerte_shop 10 10 steam epic games store
+      /offerte_shop 5-20 20 steam,gog,fanatical
       /offerte_shop steam,epic games store
     """
     args = context.args or []
@@ -564,6 +564,7 @@ async def cmd_offerte_shop(update: Update, context: ContextTypes.DEFAULT_TYPE):
     min_price = 0.0
     max_price = prefs["threshold"] if prefs["threshold"] > 0 else 20.0
     shop_tokens = args
+    result_limit = 10
 
     if args:
         first = args[0]
@@ -579,6 +580,10 @@ async def cmd_offerte_shop(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 )
                 return
 
+    if shop_tokens and shop_tokens[0].isdigit():
+        result_limit = max(1, min(30, int(shop_tokens[0])))
+        shop_tokens = shop_tokens[1:]
+
     shop_ids = parse_shop_names(shop_tokens) if shop_tokens else set(TRACKED_SHOPS.keys())
     if not shop_ids:
         await update.message.reply_text(
@@ -590,27 +595,39 @@ async def cmd_offerte_shop(update: Update, context: ContextTypes.DEFAULT_TYPE):
         )
         return
 
-    deals = get_deals_under_price(max_price, min_cut=min_cut, min_score=min_score, limit=100)
+    deals = get_deals_under_price(
+        max_price,
+        min_cut=min_cut,
+        min_score=min_score,
+        limit=max(100, result_limit),
+        fetch_limit=max(200, min(result_limit * 40, 500))
+    )
     deals = [
         d for d in filter_deals_by_shop_ids(deals, shop_ids)
         if min_price <= d.get("deal", {}).get("price", {}).get("amount", 0) <= max_price
     ]
 
     if not deals:
-        await update.message.reply_text("😔 Nessuna offerta trovata con i filtri selezionati.")
+        selected_shops = ", ".join(TRACKED_SHOPS[sid] for sid in sorted(shop_ids))
+        await update.message.reply_text(
+            "😔 Nessuna offerta trovata con i filtri selezionati.\n"
+            f"Shop: {selected_shops}\n"
+            f"Range: €{min_price}-€{max_price}\n"
+            "Prova ad alzare il prezzo massimo o rimuovere filtri con /setsoglia."
+        )
         return
 
-    best_by_shop = {}
-    for deal in deals:
-        shop = deal.get("deal", {}).get("shop", {})
-        sid = shop.get("id")
-        price = deal.get("deal", {}).get("price", {}).get("amount")
-        if sid not in best_by_shop or price < best_by_shop[sid].get("deal", {}).get("price", {}).get("amount", 999999):
-            best_by_shop[sid] = deal
+    deals = sorted(
+        deals,
+        key=lambda d: (
+            -d.get("deal", {}).get("cut", 0),
+            d.get("deal", {}).get("price", {}).get("amount", 999999)
+        )
+    )[:result_limit]
 
-    lines = [f"🏷 <b>Migliori sconti per piattaforma</b> (range €{min_price}-€{max_price}):\n"]
-    for sid in sorted(best_by_shop.keys()):
-        deal = best_by_shop[sid]
+    lines = [f"🏷 <b>Migliori sconti per piattaforma</b> (range €{min_price}-€{max_price}, top {result_limit}):\n"]
+    for deal in deals:
+        sid = deal.get("deal", {}).get("shop", {}).get("id")
         title = deal.get("title", "?")
         shop_name = TRACKED_SHOPS.get(sid, deal.get("deal", {}).get("shop", {}).get("name", "?"))
         price = deal.get("deal", {}).get("price", {}).get("amount")
