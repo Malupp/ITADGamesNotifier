@@ -553,8 +553,8 @@ async def cmd_offerte_shop(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """
     /offerte_shop [prezzo o range] [shop ...]
     Esempi:
-      /offerte_shop 10 steam epic games store
-      /offerte_shop 5-20 steam,gog,fanatical
+      /offerte_shop 10 10 steam epic games store
+      /offerte_shop 5-20 20 steam,gog,fanatical
       /offerte_shop steam,epic games store
     """
     args = context.args or []
@@ -564,6 +564,7 @@ async def cmd_offerte_shop(update: Update, context: ContextTypes.DEFAULT_TYPE):
     min_price = 0.0
     max_price = prefs["threshold"] if prefs["threshold"] > 0 else 20.0
     shop_tokens = args
+    result_limit = 10
 
     if args:
         first = args[0]
@@ -578,6 +579,10 @@ async def cmd_offerte_shop(update: Update, context: ContextTypes.DEFAULT_TYPE):
                     "/offerte_shop 5-20 steam,gog"
                 )
                 return
+
+    if shop_tokens and shop_tokens[0].isdigit():
+        result_limit = max(1, min(30, int(shop_tokens[0])))
+        shop_tokens = shop_tokens[1:]
 
     shop_ids = parse_shop_names(shop_tokens) if shop_tokens else set(TRACKED_SHOPS.keys())
     if not shop_ids:
@@ -600,17 +605,17 @@ async def cmd_offerte_shop(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text("😔 Nessuna offerta trovata con i filtri selezionati.")
         return
 
-    best_by_shop = {}
-    for deal in deals:
-        shop = deal.get("deal", {}).get("shop", {})
-        sid = shop.get("id")
-        price = deal.get("deal", {}).get("price", {}).get("amount")
-        if sid not in best_by_shop or price < best_by_shop[sid].get("deal", {}).get("price", {}).get("amount", 999999):
-            best_by_shop[sid] = deal
+    deals = sorted(
+        deals,
+        key=lambda d: (
+            -d.get("deal", {}).get("cut", 0),
+            d.get("deal", {}).get("price", {}).get("amount", 999999)
+        )
+    )[:result_limit]
 
-    lines = [f"🏷 <b>Migliori sconti per piattaforma</b> (range €{min_price}-€{max_price}):\n"]
-    for sid in sorted(best_by_shop.keys()):
-        deal = best_by_shop[sid]
+    lines = [f"🏷 <b>Migliori sconti per piattaforma</b> (range €{min_price}-€{max_price}, top {result_limit}):\n"]
+    for deal in deals:
+        sid = deal.get("deal", {}).get("shop", {}).get("id")
         title = deal.get("title", "?")
         shop_name = TRACKED_SHOPS.get(sid, deal.get("deal", {}).get("shop", {}).get("name", "?"))
         price = deal.get("deal", {}).get("price", {}).get("amount")
