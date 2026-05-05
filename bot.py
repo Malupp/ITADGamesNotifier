@@ -197,15 +197,21 @@ def get_free_games_now() -> list:
         if d.get("deal", {}).get("price", {}).get("amount") == 0
     ]
 
-def get_deals_under_price(max_price: float, min_cut: int = 0, min_score: int = 0, limit: int = 10, fetch_limit: int = None) -> list:
+def get_deals_under_price(max_price: float, min_cut: int = 0, min_score: int = 0, limit: int = 10, fetch_limit: int = None, shop_ids: set = None) -> list:
+    params = {
+        "key": ITAD_API_KEY,
+        "country": "IT",
+        "limit": fetch_limit if fetch_limit else max(50, min(limit * 10, 500)),
+        "sort": "rank",
+    }
+
+    # Passa gli shop_ids direttamente all'API se specificati
+    if shop_ids:
+        params["shops"] = ",".join(str(sid) for sid in shop_ids)
+
     response = requests.get(
         "https://api.isthereanydeal.com/deals/v2",
-        params={
-            "key": ITAD_API_KEY,
-            "country": "IT",
-            "limit": fetch_limit if fetch_limit else max(50, min(limit * 10, 500)),
-            "sort": "rank",
-        }
+        params=params
     )
     response.raise_for_status()
     data = response.json()
@@ -215,13 +221,11 @@ def get_deals_under_price(max_price: float, min_cut: int = 0, min_score: int = 0
         price = deal.get("deal", {}).get("price", {}).get("amount")
         cut   = deal.get("deal", {}).get("cut", 0)
 
-        # Filtro prezzo e sconto
         if price is None or price <= 0 or price > max_price:
             continue
         if cut < min_cut:
             continue
 
-        # Filtro review score Steam
         reviews     = deal.get("reviews") or {}
         steam       = reviews.get("steam") or {}
         steam_score = steam.get("score")
@@ -229,7 +233,7 @@ def get_deals_under_price(max_price: float, min_cut: int = 0, min_score: int = 0
         if min_score > 0 and (steam_score is None or steam_score < min_score):
             continue
 
-        deal["_steam_score"] = steam_score  # salviamo per mostrarlo nel messaggio
+        deal["_steam_score"] = steam_score
         results.append(deal)
 
         if len(results) >= limit:
@@ -600,11 +604,12 @@ async def cmd_offerte_shop(update: Update, context: ContextTypes.DEFAULT_TYPE):
         max_price,
         min_cut=min_cut,
         min_score=min_score,
-        limit=max(100, result_limit),
-        fetch_limit=max(200, min(result_limit * 40, 500))
+        limit=result_limit,
+        fetch_limit=max(200, min(result_limit * 20, 500)),
+        shop_ids=shop_ids  # ← passato direttamente all'API
     )
     deals = [
-        d for d in filter_deals_by_shop_ids(deals, shop_ids)
+        d for d in deals
         if min_price <= d.get("deal", {}).get("price", {}).get("amount", 0) <= max_price
     ]
 
