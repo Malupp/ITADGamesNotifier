@@ -59,7 +59,7 @@ def format_expiry(expiry_str):
 def send_telegram_message(text):
     url = f"https://api.telegram.org/bot{BOT_TOKEN}/sendMessage"
 
-    targets = [c for c in [CHAT_ID, CHAT_ID_GROUP] if c]  # ignora se non impostato
+    targets = list(dict.fromkeys(c.strip() for c in [CHAT_ID, CHAT_ID_GROUP] if c and c.strip()))  # ignora vuoti e deduplica chat uguali
 
     for chat_id in targets:
         payload = {
