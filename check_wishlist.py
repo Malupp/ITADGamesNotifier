@@ -100,16 +100,35 @@ def main():
 
         for item in game_items:
             last_price = item["last_notified_price"]
-            title      = item["game_title"]
-            user_id    = item["user_id"]
+            title = item["game_title"]
+            user_id = item["user_id"]
 
-            # Notifica se il prezzo è sceso rispetto all'ultima notifica
-            if last_price is None or current_price < float(last_price):
+            should_notify = last_price is None or current_price < float(last_price)
+
+            if should_notify:
                 drop_str = ""
                 if last_price is not None:
                     drop = round(float(last_price) - current_price, 2)
                     drop_pct = round((drop / float(last_price)) * 100)
                     drop_str = f"\n📉 Era €{last_price} → risparmi €{drop} ({drop_pct}%)"
+
+                message = (
+                    f"🔔 <b>Calo prezzo wishlist!</b>\n\n"
+                    f"🎮 <b>{title}</b>\n"
+                    f"🏪 {shop}\n"
+                    f"💰 Ora a <b>€{current_price}</b>"
+                    f"{drop_str}\n"
+                    f"🔗 {deal_url}"
+                )
+
+                send_telegram_message(user_id, message)
+                notified += 1
+                print(f"  → Notificato {item['username']}: {title} ora €{current_price}")
+
+            # Aggiorna SEMPRE se il prezzo è cambiato
+            if last_price is None or current_price != float(last_price):
+                update_last_notified_price(user_id, slug, current_price)
+                print(f"  → DB aggiornato: {title} €{last_price} → €{current_price}")
 
                 message = (
                     f"🔔 <b>Calo prezzo wishlist!</b>\n\n"
