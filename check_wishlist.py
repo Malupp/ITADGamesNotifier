@@ -106,7 +106,7 @@ def main():
             should_notify = last_price is None or current_price < float(last_price)
 
             if should_notify:
-                drop_str = ""
+                drop_str = ""  # inizializzato qui prima di tutto
                 if last_price is not None:
                     drop = round(float(last_price) - current_price, 2)
                     drop_pct = round((drop / float(last_price)) * 100)
