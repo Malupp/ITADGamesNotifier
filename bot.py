@@ -29,6 +29,7 @@ TRACKED_SHOPS = {
     52: "EA Store",
     61: "Steam",
     62: "Ubisoft Store",
+    64: "WinGameStore",
 }
 
 
