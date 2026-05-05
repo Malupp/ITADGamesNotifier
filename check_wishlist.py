@@ -16,11 +16,10 @@ def get_db():
 
 
 def get_all_wishlist_items() -> list:
-    """Ritorna tutti i giochi in wishlist con user_id e prezzi salvati."""
     db = get_db()
     cursor = db.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
     cursor.execute("""
-        SELECT user_id, username, game_slug, game_title, 
+        SELECT user_id, username, game_slug, game_title,
                price_at_add, last_notified_price, last_notified_shop, last_notified_url
         FROM itad_wishlist
         WHERE game_slug IS NOT NULL
@@ -32,7 +31,6 @@ def get_all_wishlist_items() -> list:
 
 
 def get_prices_batch(game_ids: list) -> dict:
-    """Recupera prezzi per una lista di game UUID."""
     response = requests.post(
         "https://api.isthereanydeal.com/games/prices/v3",
         params={"key": ITAD_API_KEY, "country": "IT"},
@@ -74,8 +72,7 @@ def main():
         print("Wishlist vuota, nulla da controllare.")
         return
 
-    # Raggruppa per game_slug per fare una sola chiamata API per gioco
-    games_map = {}  # slug -> lista di item
+    games_map = {}
     for item in items:
         slug = item["game_slug"]
         if slug not in games_map:
@@ -84,7 +81,6 @@ def main():
 
     print(f"Controllo prezzi per {len(games_map)} giochi unici...")
 
-    # Recupera prezzi in batch (max 100 per chiamata)
     slugs = list(games_map.keys())
     prices_data = get_prices_batch(slugs)
 
@@ -94,65 +90,47 @@ def main():
         if not game_data or not game_data.get("deals"):
             continue
 
-        # Prezzo minimo attuale
-        best_deal = min(game_data["deals"], key=lambda x: x["price"]["amount"])
+        best_deal     = min(game_data["deals"], key=lambda x: x["price"]["amount"])
         current_price = best_deal["price"]["amount"]
-        shop          = best_deal.get("shop", {}).get("name", "?")
-        deal_url      = best_deal.get("url", "")
+        current_shop  = best_deal.get("shop", {}).get("name", "?")
+        current_url   = best_deal.get("url", "")
 
         for item in game_items:
             last_price = item["last_notified_price"]
-            last_shop = item.get("last_notified_shop")
-            title = item["game_title"]
-            user_id = item["user_id"]
+            last_shop  = item.get("last_notified_shop")
+            title      = item["game_title"]
+            user_id    = item["user_id"]
 
             should_notify = last_price is None or current_price < float(last_price)
 
             if should_notify:
-                drop_str = ""  # inizializzato qui prima di tutto
+                drop_str = ""
                 if last_price is not None:
-                    drop = round(float(last_price) - current_price, 2)
+                    drop     = round(float(last_price) - current_price, 2)
                     drop_pct = round((drop / float(last_price)) * 100)
                     drop_str = f"\n📉 Era €{last_price} → risparmi €{drop} ({drop_pct}%)"
-                    if last_shop and last_shop != shop:
-                        drop_str += f"\n🏪 {shop} ha abbassato il prezzo rispetto a {last_shop}"
+                    if last_shop and last_shop != current_shop:
+                        drop_str += f"\n🏪 Miglior prezzo ora su {current_shop} (prima: {last_shop})"
 
                 message = (
                     f"🔔 <b>Calo prezzo wishlist!</b>\n\n"
                     f"🎮 <b>{title}</b>\n"
-                    f"🏪 {shop}\n"
+                    f"🏪 {current_shop}\n"
                     f"💰 Ora a <b>€{current_price}</b>"
                     f"{drop_str}\n"
-                    f"🔗 {deal_url}"
+                    f"🔗 {current_url}"
                 )
 
                 send_telegram_message(user_id, message)
                 notified += 1
                 print(f"  → Notificato {item['username']}: {title} ora €{current_price}")
 
-            # Aggiorna SEMPRE se il prezzo è cambiato
-            if (
-                last_price is None
-                or current_price != float(last_price)
-                or item.get("last_notified_shop") != shop
-                or item.get("last_notified_url") != deal_url
-            ):
-                update_last_notified_state(user_id, slug, current_price, shop, deal_url)
-                print(f"  → DB aggiornato: {title} €{last_price} ({last_shop}) → €{current_price} ({shop})")
-
-                message = (
-                    f"🔔 <b>Calo prezzo wishlist!</b>\n\n"
-                    f"🎮 <b>{title}</b>\n"
-                    f"🏪 {shop}\n"
-                    f"💰 Ora a <b>€{current_price}</b>"
-                    f"{drop_str}\n"
-                    f"🔗 {deal_url}"
-                )
-
-                send_telegram_message(user_id, message)
-                update_last_notified_state(user_id, slug, current_price, shop, deal_url)
-                notified += 1
-                print(f"  → Notificato {item['username']}: {title} ora €{current_price}")
+            # Aggiorna SEMPRE se qualcosa è cambiato
+            price_changed = last_price is None or current_price != float(last_price)
+            shop_changed  = last_shop != current_shop
+            if price_changed or shop_changed:
+                update_last_notified_state(user_id, slug, current_price, current_shop, current_url)
+                print(f"  → DB aggiornato: {title} €{last_price} ({last_shop}) → €{current_price} ({current_shop})")
 
     print(f"Inviate {notified} notifiche.")
 
