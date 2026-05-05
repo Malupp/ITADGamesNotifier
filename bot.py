@@ -221,11 +221,13 @@ def get_deals_under_price(max_price: float, min_cut: int = 0, min_score: int = 0
         price = deal.get("deal", {}).get("price", {}).get("amount")
         cut   = deal.get("deal", {}).get("cut", 0)
 
+        # Filtro prezzo e sconto
         if price is None or price <= 0 or price > max_price:
             continue
         if cut < min_cut:
             continue
 
+        # Filtro review score Steam
         reviews     = deal.get("reviews") or {}
         steam       = reviews.get("steam") or {}
         steam_score = steam.get("score")
