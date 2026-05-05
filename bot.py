@@ -14,6 +14,7 @@ load_dotenv()
 BOT_TOKEN    = os.getenv("TELEGRAM_BOT_TOKEN")
 ITAD_API_KEY = os.getenv("ITAD_API_KEY")
 DATABASE_URL = os.getenv("DATABASE_URL")
+GGDEALS_API_KEY = os.getenv("GGDEALS_API_KEY")
 
 logging.basicConfig(level=logging.INFO)
 
@@ -309,6 +310,45 @@ def filter_deals_by_shop_ids(deals: list, shop_ids: set) -> list:
         if shop_id in shop_ids:
             filtered.append(deal)
     return filtered
+
+
+#  ─── GG Deals ──────────────────────────────────────────────────────────────────
+
+def get_steam_appid(title: str) -> str | None:
+    """Cerca lo Steam App ID dal titolo tramite Steam Search API."""
+    try:
+        response = requests.get(
+            "https://store.steampowered.com/api/storesearch/",
+            params={"term": title, "l": "italian", "cc": "IT"},
+            timeout=5
+        )
+        data = response.json()
+        items = data.get("items", [])
+        if items:
+            return str(items[0]["id"])
+    except:
+        pass
+    return None
+
+def get_ggdeals_prices(steam_app_ids: list) -> dict:
+    """Recupera prezzi keyshop da gg.deals per una lista di Steam App ID."""
+    if not GGDEALS_API_KEY or not steam_app_ids:
+        return {}
+    try:
+        response = requests.get(
+            "https://api.gg.deals/v1/prices/",
+            params={
+                "key": GGDEALS_API_KEY,
+                "ids": ",".join(steam_app_ids),
+                "region": "it"
+            },
+            timeout=10
+        )
+        response.raise_for_status()
+        data = response.json()
+        return data.get("data", {})
+    except:
+        return {}
 
 # ─── COMANDI ──────────────────────────────────────────────────────────────────
 
@@ -786,7 +826,7 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
             await query.edit_message_text("❌ Sessione scaduta, rifai /cerca.")
             return
 
-        game_id    = game["id"]
+        game_id = game["id"]
         game_title = game["title"]
 
         await query.edit_message_text(
@@ -794,7 +834,7 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
         )
 
         prices_data = get_game_prices([game_id])
-        game_data   = prices_data.get(game_id)
+        game_data = prices_data.get(game_id)
 
         if not game_data or not game_data.get("deals"):
             await query.edit_message_text(
@@ -804,12 +844,27 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
         lines = [f"💰 <b>Prezzi per {game_title}:</b>\n"]
         for deal in sorted(game_data["deals"], key=lambda x: x["price"]["amount"])[:8]:
-            shop    = deal.get("shop", {}).get("name", "?")
-            price   = deal.get("price", {}).get("amount", 0)
-            cut     = deal.get("cut", 0)
-            url     = deal.get("url", "")
+            shop = deal.get("shop", {}).get("name", "?")
+            price = deal.get("price", {}).get("amount", 0)
+            cut = deal.get("cut", 0)
+            url = deal.get("url", "")
             cut_str = f" (-{cut}%)" if cut > 0 else ""
             lines.append(f"🏪 {shop}: <b>€{price}</b>{cut_str} — <a href='{url}'>link</a>")
+
+        # Aggiunge prezzo keyshop da gg.deals
+        steam_id = get_steam_appid(game_title)
+        if steam_id:
+            gg_data = get_ggdeals_prices([steam_id])
+            gg_game = gg_data.get(steam_id)
+            if gg_game:
+                keyshop_price = gg_game.get("prices", {}).get("currentKeyshops")
+                gg_url = gg_game.get("url", "")
+                if keyshop_price:
+                    lines.append(
+                        f"\n🔑 <b>Miglior keyshop: €{keyshop_price}</b> "
+                        f"— <a href='https://gg.deals{gg_url}'>vedi su gg.deals</a>"
+                    )
+                    lines.append("<i>(keyshop = rivenditori terzi, acquista a tuo rischio)</i>")
 
         await query.edit_message_text(
             "\n".join(lines), parse_mode="HTML", disable_web_page_preview=True
