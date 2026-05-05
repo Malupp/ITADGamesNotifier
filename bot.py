@@ -197,13 +197,13 @@ def get_free_games_now() -> list:
         if d.get("deal", {}).get("price", {}).get("amount") == 0
     ]
 
-def get_deals_under_price(max_price: float, min_cut: int = 0, min_score: int = 0, limit: int = 10) -> list:
+def get_deals_under_price(max_price: float, min_cut: int = 0, min_score: int = 0, limit: int = 10, fetch_limit: int = None) -> list:
     response = requests.get(
         "https://api.isthereanydeal.com/deals/v2",
         params={
             "key": ITAD_API_KEY,
             "country": "IT",
-            "limit": 50,  # prendiamo più risultati per poi filtrare
+            "limit": fetch_limit if fetch_limit else max(50, min(limit * 10, 500)),
             "sort": "rank",
         }
     )
@@ -596,14 +596,26 @@ async def cmd_offerte_shop(update: Update, context: ContextTypes.DEFAULT_TYPE):
         )
         return
 
-    deals = get_deals_under_price(max_price, min_cut=min_cut, min_score=min_score, limit=100)
+    deals = get_deals_under_price(
+        max_price,
+        min_cut=min_cut,
+        min_score=min_score,
+        limit=max(100, result_limit),
+        fetch_limit=max(200, min(result_limit * 40, 500))
+    )
     deals = [
         d for d in filter_deals_by_shop_ids(deals, shop_ids)
         if min_price <= d.get("deal", {}).get("price", {}).get("amount", 0) <= max_price
     ]
 
     if not deals:
-        await update.message.reply_text("😔 Nessuna offerta trovata con i filtri selezionati.")
+        selected_shops = ", ".join(TRACKED_SHOPS[sid] for sid in sorted(shop_ids))
+        await update.message.reply_text(
+            "😔 Nessuna offerta trovata con i filtri selezionati.\n"
+            f"Shop: {selected_shops}\n"
+            f"Range: €{min_price}-€{max_price}\n"
+            "Prova ad alzare il prezzo massimo o rimuovere filtri con /setsoglia."
+        )
         return
 
     deals = sorted(
