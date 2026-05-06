@@ -335,11 +335,12 @@ def get_steam_appid(title: str) -> str | None:
 
 def get_ggdeals_prices(steam_app_ids: list) -> dict:
     if not GGDEALS_API_KEY or not steam_app_ids:
-        print(f"DEBUG gg.deals: API key mancante o lista vuota")
+        print("DEBUG gg.deals: API key mancante o lista vuota")
         return {}
+
     try:
         response = requests.get(
-            "https://api.gg.deals/v1/prices/",
+            "https://api.gg.deals/v1/prices/by-steam-app-id/",
             params={
                 "key": GGDEALS_API_KEY,
                 "ids": ",".join(steam_app_ids),
@@ -347,11 +348,15 @@ def get_ggdeals_prices(steam_app_ids: list) -> dict:
             },
             timeout=10
         )
+
         print(f"DEBUG gg.deals status: {response.status_code}")
         print(f"DEBUG gg.deals response: {response.text[:300]}")
+
         response.raise_for_status()
         data = response.json()
+
         return data.get("data", {})
+
     except Exception as e:
         print(f"DEBUG gg.deals errore: {e}")
         return {}
