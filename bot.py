@@ -935,9 +935,12 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
         # Aggiunge prezzo keyshop da gg.deals
         steam_id = get_steam_appid(game_title)
+        print(f"DEBUG steam_id per '{game_title}': {steam_id}")
         if steam_id:
             gg_data = get_ggdeals_prices([steam_id])
+            print(f"DEBUG gg_data: {gg_data}")
             gg_game = gg_data.get(steam_id)
+            print(f"DEBUG gg_data: {gg_game}")
             if gg_game:
                 keyshop_price = gg_game.get("prices", {}).get("currentKeyshops")
                 gg_url = gg_game.get("url", "")
