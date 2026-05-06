@@ -953,16 +953,17 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
             gg_game = gg_data.get(steam_id)
             logger.debug(f"DEBUG gg_data: {gg_game}")
             if gg_game:
-                keyshop_data = gg_game.get("prices", {}).get("currentKeyshops")
+                # currentKeyshops è direttamente il prezzo (stringa), non un dizionario
+                keyshop_price = gg_game.get("prices", {}).get("currentKeyshops")
                 gg_url = gg_game.get("url", "")
-                if keyshop_data and isinstance(keyshop_data, dict):
-                    keyshop_price = keyshop_data.get("price")
-                    if keyshop_price:
-                        lines.append(
-                                f"\n🔑 <b>Miglior keyshop: €{keyshop_price}</b> "
-                                f"— <a href='https://gg.deals{gg_url}'>vedi su gg.deals</a>"
-                            )
-                        lines.append("<i>(keyshop = rivenditori terzi, acquista a tuo rischio)</i>")
+
+                # Controlla se keyshop_price esiste ed è un valore valido
+                if keyshop_price:
+                    lines.append(
+                        f"\n🔑 <b>Miglior keyshop: €{keyshop_price}</b> "
+                        f"— <a href='https://gg.deals{gg_url}'>vedi su gg.deals</a>"
+                    )
+                    lines.append("<i>(keyshop = rivenditori terzi, acquista a tuo rischio)</i>")
 
         await query.edit_message_text(
             "\n".join(lines), parse_mode="HTML", disable_web_page_preview=True
