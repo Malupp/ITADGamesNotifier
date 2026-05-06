@@ -953,15 +953,25 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
             gg_game = gg_data.get(steam_id)
             logger.debug(f"DEBUG gg_data: {gg_game}")
             if gg_game:
-                # currentKeyshops è direttamente il prezzo (stringa), non un dizionario
-                keyshop_price = gg_game.get("prices", {}).get("currentKeyshops")
                 gg_url = gg_game.get("url", "")
+                keyshop_price = gg_game.get("prices", {}).get("currentKeyshops")
 
-                # Controlla se keyshop_price esiste ed è un valore valido
                 if keyshop_price:
+                    # Costruisci URL in modo robusto
+                    if gg_url:
+                        if gg_url.startswith('http'):
+                            full_url = gg_url  # URL già completo
+                        elif gg_url.startswith('/'):
+                            full_url = f"https://gg.deals{gg_url}"  # URL relativo
+                        else:
+                            full_url = f"https://gg.deals/{gg_url}"  # URL senza slash iniziale
+                    else:
+                        # Fallback: costruisci dal titolo (meno preciso)
+                        full_url = f"https://gg.deals/game/{game_title.lower().replace(' ', '-')}/"
+
                     lines.append(
                         f"\n🔑 <b>Miglior keyshop: €{keyshop_price}</b> "
-                        f"— <a href='https://gg.deals{gg_url}'>vedi su gg.deals</a>"
+                        f"— <a href='{full_url}'>vedi su gg.deals</a>"
                     )
                     lines.append("<i>(keyshop = rivenditori terzi, acquista a tuo rischio)</i>")
 
