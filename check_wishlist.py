@@ -39,6 +39,18 @@ def get_prices_batch(game_ids: list) -> dict:
     response.raise_for_status()
     return {item["id"]: item for item in response.json()}
 
+def get_user_min_discount(user_id: int) -> int:
+    db = get_db()
+    cursor = db.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
+    cursor.execute(
+        "SELECT min_discount_pct FROM itad_user_prefs WHERE user_id=%s",
+        (user_id,)
+    )
+    row = cursor.fetchone()
+    cursor.close()
+    db.close()
+    return int(row["min_discount_pct"]) if row and row["min_discount_pct"] is not None else 10
+
 
 def update_last_notified_state(user_id: int, slug: str, price: float, shop: str, url: str):
     db = get_db()
@@ -97,11 +109,25 @@ def main():
 
         for item in game_items:
             last_price = item["last_notified_price"]
-            last_shop  = item.get("last_notified_shop")
-            title      = item["game_title"]
-            user_id    = item["user_id"]
+            last_shop = item.get("last_notified_shop")
+            title = item["game_title"]
+            user_id = item["user_id"]
+            price_at_add = item.get("price_at_add")
 
-            should_notify = last_price is None or current_price < float(last_price)
+            # Soglia sconto: usa quella del singolo gioco se impostata, altrimenti quella globale
+            item_min_pct = item.get("min_discount_pct")
+            global_min_pct = get_user_min_discount(user_id)
+            effective_min_pct = item_min_pct if item_min_pct is not None else global_min_pct
+
+            # Calcola % sconto rispetto al prezzo quando è stato aggiunto
+            if price_at_add and float(price_at_add) > 0 and current_price < float(price_at_add):
+                discount_pct = round((float(price_at_add) - current_price) / float(price_at_add) * 100)
+            else:
+                discount_pct = 0
+
+            price_dropped = last_price is None or current_price < float(last_price)
+            discount_enough = discount_pct >= effective_min_pct
+            should_notify = price_dropped and discount_enough
 
             if should_notify:
                 drop_str = ""

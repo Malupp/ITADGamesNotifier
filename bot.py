@@ -9,6 +9,8 @@ from telegram.ext import (
     ApplicationBuilder, CommandHandler, ContextTypes, CallbackQueryHandler
 )
 
+from check_wishlist import get_user_min_discount
+
 load_dotenv()
 
 BOT_TOKEN    = os.getenv("TELEGRAM_BOT_TOKEN")
@@ -167,7 +169,8 @@ def wishlist_get(user_id: int) -> list:
     db = get_db()
     cursor = db.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
     cursor.execute(
-        """SELECT game_slug, game_title, price_at_add, last_notified_price, added_at
+        """SELECT game_slug, game_title, price_at_add, last_notified_price, 
+                  added_at, min_discount_pct
            FROM itad_wishlist
            WHERE user_id=%s
            ORDER BY added_at DESC""",
@@ -370,6 +373,9 @@ async def cmd_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "  <i>└ es. /offerte_shop steam,epic games store (usa la soglia default)</i>\n"
         "/confronta &lt;titolo&gt; — confronta i prezzi su tutte le piattaforme monitorate\n"
         "/setsoglia prezzo|sconto|review &lt;valore&gt; — imposta i tuoi filtri\n"
+        "/setsconto [%] — soglia sconto globale per notifiche wishlist\n"
+        "  <i>└ es. /setsconto 20 → notifica solo se sconto ≥20%</i>\n"
+        "/setscontog — soglia sconto per singolo gioco\n"
         "/help — mostra questo messaggio\n\n"
         "🔔 <b>Monitoraggio prezzi automatico:</b>\n"
         "Ogni ora controllo i prezzi dei giochi nella tua wishlist. "
@@ -806,6 +812,82 @@ async def cmd_setsoglia(update: Update, context: ContextTypes.DEFAULT_TYPE):
     except ValueError:
         await update.message.reply_text("❌ Valore non valido.")
 
+async def cmd_setsconto(update: Update, context: ContextTypes.DEFAULT_TYPE):
+        """
+        /setsconto 20          → imposta soglia globale al 20%
+        /setsconto             → mostra soglia attuale
+        """
+        user_id  = update.effective_user.id
+        username = update.effective_user.username or update.effective_user.first_name
+
+        if not context.args:
+            current = get_user_min_discount(user_id)
+            await update.message.reply_text(
+                f"🔔 La tua soglia di sconto globale è <b>{current}%</b>\n\n"
+                f"Ricevi notifiche solo quando un gioco in wishlist\n"
+                f"scende di almeno questa % rispetto al prezzo iniziale.\n\n"
+                f"Per cambiarla: /setsconto &lt;percentuale&gt;\n"
+                f"Es: /setsconto 20",
+                parse_mode="HTML"
+            )
+            return
+
+        try:
+            v = int(context.args[0])
+            if v < 1 or v > 99:
+                await update.message.reply_text("❌ La soglia deve essere tra 1 e 99.")
+                return
+        except ValueError:
+            await update.message.reply_text("❌ Uso: /setsconto <percentuale>\nEs: /setsconto 20")
+            return
+
+        db = get_db()
+        cursor = db.cursor()
+        cursor.execute(
+            """INSERT INTO itad_user_prefs (user_id, username, min_discount_pct)
+               VALUES (%s, %s, %s)
+               ON CONFLICT (user_id) DO UPDATE SET min_discount_pct=%s, username=%s""",
+            (user_id, username, v, v, username)
+        )
+        db.commit()
+        cursor.close()
+        db.close()
+
+        await update.message.reply_text(
+            f"✅ Soglia sconto globale impostata a <b>{v}%</b>\n"
+            f"Riceverai notifiche solo per sconti ≥{v}% rispetto al prezzo iniziale.",
+            parse_mode="HTML"
+        )
+
+
+async def cmd_setsconto_gioco(update: Update, context: ContextTypes.DEFAULT_TYPE):
+        """
+        /setscontog → mostra wishlist con bottoni per impostare soglia per gioco
+        """
+        user_id = update.effective_user.id
+        items   = wishlist_get(user_id)
+
+        if not items:
+            await update.message.reply_text("📋 La tua wishlist è vuota.")
+            return
+
+        context.user_data["sconto_items"] = {str(i): item for i, item in enumerate(items)}
+
+        keyboard = []
+        for i, item in enumerate(items):
+            pct     = item.get("min_discount_pct")
+            pct_str = f" ({pct}%)" if pct is not None else " (globale)"
+            keyboard.append([InlineKeyboardButton(
+                f"🎮 {item['game_title']}{pct_str}",
+                callback_data=f"setscontog|{i}"
+            )])
+        keyboard.append([InlineKeyboardButton("❌ Annulla", callback_data="cancel")])
+
+        await update.message.reply_text(
+            "Seleziona il gioco per impostare la soglia di sconto:",
+            reply_markup=InlineKeyboardMarkup(keyboard)
+        )
+
 # ─── CALLBACK BUTTONS ────────────────────────────────────────────────────────
 
 async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -934,6 +1016,67 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
         else:
             await query.edit_message_text("❌ Gioco non trovato nella wishlist.")
 
+    elif action == "setscontog":
+        item = context.user_data.get("sconto_items", {}).get(idx)
+        if not item:
+            await query.edit_message_text("❌ Sessione scaduta, rifai /setscontog.")
+            return
+
+        context.user_data["sconto_target"] = item
+
+        keyboard = [
+            [InlineKeyboardButton("🌐 Usa soglia globale", callback_data="setscontog_apply|None")],
+            [InlineKeyboardButton("10%", callback_data="setscontog_apply|10"),
+             InlineKeyboardButton("20%", callback_data="setscontog_apply|20"),
+             InlineKeyboardButton("30%", callback_data="setscontog_apply|30")],
+            [InlineKeyboardButton("40%", callback_data="setscontog_apply|40"),
+             InlineKeyboardButton("50%", callback_data="setscontog_apply|50"),
+             InlineKeyboardButton("60%", callback_data="setscontog_apply|60")],
+            [InlineKeyboardButton("70%", callback_data="setscontog_apply|70"),
+             InlineKeyboardButton("75%", callback_data="setscontog_apply|75"),
+             InlineKeyboardButton("80%", callback_data="setscontog_apply|80")],
+            [InlineKeyboardButton("❌ Annulla", callback_data="cancel")],
+        ]
+
+        current_pct = item.get("min_discount_pct")
+        current_str = f"{current_pct}%" if current_pct is not None else "soglia globale"
+
+        await query.edit_message_text(
+            f"🎮 <b>{item['game_title']}</b>\n"
+            f"Soglia attuale: <b>{current_str}</b>\n\n"
+            f"Scegli la soglia di sconto per questo gioco:",
+            reply_markup=InlineKeyboardMarkup(keyboard),
+            parse_mode="HTML"
+        )
+
+    elif action == "setscontog_apply":
+        item = context.user_data.get("sconto_target")
+        if not item:
+            await query.edit_message_text("❌ Sessione scaduta, rifai /setscontog.")
+            return
+
+        raw_pct = parts[1]
+        pct = None if raw_pct == "None" else int(raw_pct)
+
+        db = get_db()
+        cursor = db.cursor()
+        cursor.execute(
+            """UPDATE itad_wishlist
+               SET min_discount_pct=%s
+               WHERE user_id=%s AND game_slug=%s""",
+            (pct, query.from_user.id, item["game_slug"])
+        )
+        db.commit()
+        cursor.close()
+        db.close()
+
+        if pct is None:
+            msg = f"✅ <b>{item['game_title']}</b>\nUsa ora la soglia globale."
+        else:
+            msg = f"✅ <b>{item['game_title']}</b>\nNotifica quando sconto ≥<b>{pct}%</b>."
+
+        await query.edit_message_text(msg, parse_mode="HTML")
+
 
 # ─── AVVIO ────────────────────────────────────────────────────────────────────
 
@@ -953,6 +1096,8 @@ def main():
     app.add_handler(CommandHandler("offerte_shop", cmd_offerte_shop))
     app.add_handler(CommandHandler("confronta", cmd_confronta))
     app.add_handler(CommandHandler("setsoglia", cmd_setsoglia))
+    app.add_handler(CommandHandler("setsconto", cmd_setsconto))
+    app.add_handler(CommandHandler("setscontog", cmd_setsconto_gioco))
     app.add_handler(CallbackQueryHandler(handle_callback))
 
     print("✅ Bot avviato...")
