@@ -18,7 +18,11 @@ ITAD_API_KEY = os.getenv("ITAD_API_KEY")
 DATABASE_URL = os.getenv("DATABASE_URL")
 GGDEALS_API_KEY = os.getenv("GGDEALS_API_KEY")
 
-logging.basicConfig(level=logging.INFO)
+logging.basicConfig(level=logging.DEBUG,format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
+logger = logging.getLogger(__name__)
+file_handler = logging.FileHandler('bot.log')
+file_handler.setLevel(logging.DEBUG)
+logging.getLogger().addHandler(file_handler)
 
 TRACKED_SHOPS = {
     6: "Fanatical",
@@ -334,10 +338,11 @@ def get_steam_appid(title: str) -> str | None:
     return None
 
 def get_ggdeals_prices(steam_app_ids: list) -> dict:
+    logger.info(f"📊 Chiamata gg.deals per {len(steam_app_ids)} giochi")
+    logger.debug(f"Steam IDs: {steam_app_ids}")
     if not GGDEALS_API_KEY or not steam_app_ids:
-        print("DEBUG gg.deals: API key mancante o lista vuota")
+        logger.error("❌ GGDEALS_API_KEY non configurata")
         return {}
-
     try:
         response = requests.get(
             "https://api.gg.deals/v1/prices/by-steam-app-id/",
@@ -348,17 +353,15 @@ def get_ggdeals_prices(steam_app_ids: list) -> dict:
             },
             timeout=10
         )
-
-        print(f"DEBUG gg.deals status: {response.status_code}")
-        print(f"DEBUG gg.deals response: {response.text[:300]}")
-
+        logger.debug(f"DEBUG gg.deals status: {response.status_code}")
+        logger.debug(f"DEBUG gg.deals response: {response.text[:300]}")
         response.raise_for_status()
         data = response.json()
 
         return data.get("data", {})
 
     except Exception as e:
-        print(f"DEBUG gg.deals errore: {e}")
+        logger.debug(f"DEBUG gg.deals errore: {e}")
         return {}
 
 # ─── COMANDI ──────────────────────────────────────────────────────────────────
@@ -943,12 +946,12 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
         # Aggiunge prezzo keyshop da gg.deals
         steam_id = get_steam_appid(game_title)
-        print(f"DEBUG steam_id per '{game_title}': {steam_id}")
+        logger.debug(f"DEBUG steam_id per '{game_title}': {steam_id}")
         if steam_id:
             gg_data = get_ggdeals_prices([steam_id])
-            print(f"DEBUG gg_data: {gg_data}")
+            logger.debug(f"DEBUG gg_data: {gg_data}")
             gg_game = gg_data.get(steam_id)
-            print(f"DEBUG gg_data: {gg_game}")
+            logger.debug(f"DEBUG gg_data: {gg_game}")
             if gg_game:
                 keyshop_data = gg_game.get("prices", {}).get("currentKeyshops")
                 gg_url = gg_game.get("url", "")
@@ -1113,7 +1116,7 @@ def main():
     app.add_handler(CommandHandler("setscontog", cmd_setsconto_gioco))
     app.add_handler(CallbackQueryHandler(handle_callback))
 
-    print("✅ Bot avviato...")
+    logger.debug("✅ Bot avviato...")
     app.run_polling(drop_pending_updates=True)
 
 if __name__ == "__main__":
