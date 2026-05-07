@@ -37,7 +37,7 @@ def get_free_games():
     params = {
         "key": ITAD_API_KEY,
         "country": "IT",
-        "limit": 50,
+        "limit": 100,
         "sort": "price",
     }
 

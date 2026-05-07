@@ -208,7 +208,7 @@ def get_game_prices(game_ids: list) -> dict:
 def get_free_games_now() -> list:
     response = requests.get(
         "https://api.isthereanydeal.com/deals/v2",
-        params={"key": ITAD_API_KEY, "country": "IT", "limit": 20, "sort": "price"}
+        params={"key": ITAD_API_KEY, "country": "IT", "limit": 100, "sort": "price"}
     )
     response.raise_for_status()
     data = response.json()
@@ -216,9 +216,13 @@ def get_free_games_now() -> list:
     results = []
     for d in data.get("list", []):
         price = d.get("deal", {}).get("price", {}).get("amount")
-        logger.debug(f"FREE_CHECK: {d.get('title')} → price={price!r} type={type(price).__name__}")
         if price == 0:
             results.append(d)
+        elif price > 0:
+            # I risultati sono ordinati per prezzo, appena troviamo prezzi > 0
+            # possiamo fermarci solo se tutti i 0 vengono prima
+            # ma per sicurezza continuiamo a scorrere
+            pass
 
     logger.debug(f"FREE_GAMES trovati: {len(results)}")
     return results
