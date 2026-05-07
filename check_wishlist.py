@@ -1,90 +1,19 @@
-import os
-import requests
-import psycopg2
-import psycopg2.extras
-from dotenv import load_dotenv
+import logging
+from itad_api import get_game_prices
+from telegram_utils import send_message
+from db import wishlist_get_all, wishlist_update_notified, prefs_get
 
-load_dotenv()
-
-BOT_TOKEN    = os.getenv("TELEGRAM_BOT_TOKEN")
-ITAD_API_KEY = os.getenv("ITAD_API_KEY")
-DATABASE_URL = os.getenv("DATABASE_URL")
-
-
-def get_db():
-    return psycopg2.connect(DATABASE_URL, sslmode="require")
-
-
-def get_all_wishlist_items() -> list:
-    db = get_db()
-    cursor = db.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
-    cursor.execute("""
-        SELECT user_id, username, game_slug, game_title,
-               price_at_add, last_notified_price, last_notified_shop, last_notified_url
-        FROM itad_wishlist
-        WHERE game_slug IS NOT NULL
-    """)
-    rows = cursor.fetchall()
-    cursor.close()
-    db.close()
-    return rows
-
-
-def get_prices_batch(game_ids: list) -> dict:
-    response = requests.post(
-        "https://api.isthereanydeal.com/games/prices/v3",
-        params={"key": ITAD_API_KEY, "country": "IT"},
-        json=game_ids
-    )
-    response.raise_for_status()
-    return {item["id"]: item for item in response.json()}
-
-def get_user_min_discount(user_id: int) -> int:
-    db = get_db()
-    cursor = db.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
-    cursor.execute(
-        "SELECT min_discount_pct FROM itad_user_prefs WHERE user_id=%s",
-        (user_id,)
-    )
-    row = cursor.fetchone()
-    cursor.close()
-    db.close()
-    return int(row["min_discount_pct"]) if row and row["min_discount_pct"] is not None else 10
-
-
-def update_last_notified_state(user_id: int, slug: str, price: float, shop: str, url: str):
-    db = get_db()
-    cursor = db.cursor()
-    cursor.execute(
-        """UPDATE itad_wishlist
-           SET last_notified_price=%s,
-               last_notified_shop=%s,
-               last_notified_url=%s
-           WHERE user_id=%s AND game_slug=%s""",
-        (price, shop, url, user_id, slug)
-    )
-    db.commit()
-    cursor.close()
-    db.close()
-
-
-def send_telegram_message(chat_id: int, text: str):
-    url = f"https://api.telegram.org/bot{BOT_TOKEN}/sendMessage"
-    requests.post(url, json={
-        "chat_id": chat_id,
-        "text": text,
-        "parse_mode": "HTML",
-        "disable_web_page_preview": True
-    }).raise_for_status()
+logger = logging.getLogger(__name__)
 
 
 def main():
-    items = get_all_wishlist_items()
+    items = wishlist_get_all()
     if not items:
         print("Wishlist vuota, nulla da controllare.")
         return
 
-    games_map = {}
+    # Raggruppa per game_slug
+    games_map: dict = {}
     for item in items:
         slug = item["game_slug"]
         if slug not in games_map:
@@ -93,8 +22,7 @@ def main():
 
     print(f"Controllo prezzi per {len(games_map)} giochi unici...")
 
-    slugs = list(games_map.keys())
-    prices_data = get_prices_batch(slugs)
+    prices_data = get_game_prices(list(games_map.keys()))
 
     notified = 0
     for slug, game_items in games_map.items():
@@ -108,26 +36,26 @@ def main():
         current_url   = best_deal.get("url", "")
 
         for item in game_items:
-            last_price = item["last_notified_price"]
-            last_shop = item.get("last_notified_shop")
-            title = item["game_title"]
-            user_id = item["user_id"]
+            last_price   = item["last_notified_price"]
+            last_shop    = item.get("last_notified_shop")
+            title        = item["game_title"]
+            user_id      = item["user_id"]
             price_at_add = item.get("price_at_add")
 
-            # Soglia sconto: usa quella del singolo gioco se impostata, altrimenti quella globale
-            item_min_pct = item.get("min_discount_pct")
-            global_min_pct = get_user_min_discount(user_id)
-            effective_min_pct = item_min_pct if item_min_pct is not None else global_min_pct
+            # Soglia sconto: per gioco se impostata, altrimenti globale utente
+            item_pct      = item.get("min_discount_pct")
+            global_pct    = prefs_get(user_id)["min_discount_pct"]
+            effective_pct = item_pct if item_pct is not None else global_pct
 
-            # Calcola % sconto rispetto al prezzo quando è stato aggiunto
+            # Calcola % sconto rispetto al prezzo all'aggiunta
             if price_at_add and float(price_at_add) > 0 and current_price < float(price_at_add):
                 discount_pct = round((float(price_at_add) - current_price) / float(price_at_add) * 100)
             else:
                 discount_pct = 0
 
-            price_dropped = last_price is None or current_price < float(last_price)
-            discount_enough = discount_pct >= effective_min_pct
-            should_notify = price_dropped and discount_enough
+            price_dropped   = last_price is None or current_price < float(last_price)
+            discount_enough = discount_pct >= effective_pct
+            should_notify   = price_dropped and discount_enough
 
             if should_notify:
                 drop_str = ""
@@ -147,15 +75,15 @@ def main():
                     f"🔗 {current_url}"
                 )
 
-                send_telegram_message(user_id, message)
+                send_message(user_id, message)
                 notified += 1
                 print(f"  → Notificato {item['username']}: {title} ora €{current_price}")
 
-            # Aggiorna SEMPRE se qualcosa è cambiato
+            # Aggiorna DB se prezzo o shop sono cambiati
             price_changed = last_price is None or current_price != float(last_price)
             shop_changed  = last_shop != current_shop
             if price_changed or shop_changed:
-                update_last_notified_state(user_id, slug, current_price, current_shop, current_url)
+                wishlist_update_notified(user_id, slug, current_price, current_shop, current_url)
                 print(f"  → DB aggiornato: {title} €{last_price} ({last_shop}) → €{current_price} ({current_shop})")
 
     print(f"Inviate {notified} notifiche.")

@@ -1,88 +1,27 @@
-import requests
 import json
-import os
-from dotenv import load_dotenv
 import logging
+from config import STATE_FILE
+from itad_api import get_free_games
+from telegram_utils import broadcast, format_expiry
 
-load_dotenv()
-
-BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN")
-CHAT_ID = os.getenv("TELEGRAM_CHAT_ID")
-CHAT_ID_GROUP = os.getenv("TELEGRAM_CHAT_GROUP")  # opzionale
-ITAD_API_KEY = os.getenv("ITAD_API_KEY")
-
-STATE_FILE = "state.json"
-
-logging.basicConfig(level=logging.DEBUG,format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
 logger = logging.getLogger(__name__)
-file_handler = logging.FileHandler('bot.log')
-file_handler.setLevel(logging.DEBUG)
-logging.getLogger().addHandler(file_handler)
 
-def load_state():
+
+def load_state() -> dict:
     try:
         with open(STATE_FILE, "r") as f:
             return json.load(f)
-    except:
+    except Exception:
         return {"sent_deals": []}
 
-
-def save_state(state):
+def save_state(state: dict):
     with open(STATE_FILE, "w") as f:
         json.dump(state, f)
 
 
-def get_free_games():
-    url = "https://api.isthereanydeal.com/deals/v2"
-    params = {
-        "key": ITAD_API_KEY,
-        "country": "IT",
-        "limit": 100,
-        "sort": "price",
-    }
-
-    response = requests.get(url, params=params)
-    response.raise_for_status()
-    data = response.json()
-
-    results = []
-    for deal in data.get("list", []):
-        price = deal.get("deal", {}).get("price", {}).get("amount")
-        logging.debug(f"MAIN_FREE_CHECK: {deal.get('title')} → price={price!r} type={type(price).__name__}")
-        if price == 0:
-            results.append(deal)
-
-    return results
-
-
-def format_expiry(expiry_str):
-    if not expiry_str:
-        return None
-    try:
-        from datetime import datetime
-        dt = datetime.fromisoformat(expiry_str)
-        return dt.strftime("%d/%m/%Y alle %H:%M")
-    except:
-        return None
-
-def send_telegram_message(text):
-    url = f"https://api.telegram.org/bot{BOT_TOKEN}/sendMessage"
-
-    targets = list(dict.fromkeys(c.strip() for c in [CHAT_ID, CHAT_ID_GROUP] if c and c.strip()))  # ignora vuoti e deduplica chat uguali
-
-    for chat_id in targets:
-        payload = {
-            "chat_id": chat_id,
-            "text": text,
-            "parse_mode": "HTML",
-            "disable_web_page_preview": False
-        }
-        requests.post(url, json=payload).raise_for_status()
-
-
 def main():
     state = load_state()
-    sent = set(state["sent_deals"])
+    sent  = set(state["sent_deals"])
 
     deals = get_free_games()
     print(f"Trovati {len(deals)} giochi gratuiti")
@@ -90,7 +29,6 @@ def main():
     new_count = 0
     for deal in deals:
         deal_id = deal["slug"]
-
         if deal_id in sent:
             continue
 
@@ -111,13 +49,12 @@ def main():
             f"🔗 {url}"
         )
 
-        send_telegram_message(message)
+        broadcast(message)
         sent.add(deal_id)
         new_count += 1
         print(f"  → Inviato: {title} ({shop})")
 
     print(f"Inviati {new_count} nuovi giochi")
-
     state["sent_deals"] = list(sent)
     save_state(state)
 
