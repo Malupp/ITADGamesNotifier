@@ -212,10 +212,16 @@ def get_free_games_now() -> list:
     )
     response.raise_for_status()
     data = response.json()
-    return [
-        d for d in data.get("list", [])
-        if d.get("deal", {}).get("price", {}).get("amount") == 0
-    ]
+
+    results = []
+    for d in data.get("list", []):
+        price = d.get("deal", {}).get("price", {}).get("amount")
+        logger.debug(f"FREE_CHECK: {d.get('title')} → price={price!r} type={type(price).__name__}")
+        if price == 0:
+            results.append(d)
+
+    logger.debug(f"FREE_GAMES trovati: {len(results)}")
+    return results
 
 def get_deals_under_price(max_price: float, min_cut: int = 0, min_score: int = 0, limit: int = 10, fetch_limit: int = None, shop_ids: set = None) -> list:
     params = {

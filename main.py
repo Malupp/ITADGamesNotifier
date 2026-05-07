@@ -2,6 +2,7 @@ import requests
 import json
 import os
 from dotenv import load_dotenv
+import logging
 
 load_dotenv()
 
@@ -12,6 +13,11 @@ ITAD_API_KEY = os.getenv("ITAD_API_KEY")
 
 STATE_FILE = "state.json"
 
+logging.basicConfig(level=logging.DEBUG,format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
+logger = logging.getLogger(__name__)
+file_handler = logging.FileHandler('bot.log')
+file_handler.setLevel(logging.DEBUG)
+logging.getLogger().addHandler(file_handler)
 
 def load_state():
     try:
@@ -37,13 +43,16 @@ def get_free_games():
 
     response = requests.get(url, params=params)
     response.raise_for_status()
-
     data = response.json()
 
-    return [
-        deal for deal in data.get("list", [])
-        if deal.get("deal", {}).get("price", {}).get("amount") == 0
-    ]
+    results = []
+    for deal in data.get("list", []):
+        price = deal.get("deal", {}).get("price", {}).get("amount")
+        logging.debug(f"MAIN_FREE_CHECK: {deal.get('title')} → price={price!r} type={type(price).__name__}")
+        if price == 0:
+            results.append(deal)
+
+    return results
 
 
 def format_expiry(expiry_str):
