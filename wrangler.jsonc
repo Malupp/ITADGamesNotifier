@@ -1,0 +1,46 @@
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "itad-games-notifier",
+  "main": "src/worker.ts",
+  "compatibility_date": "2026-10-08",
+  "account_id": "c9be74da4c0f0fe0e5f18bc2e554cacb",
+  "workers_dev": true,
+  "vars": {
+    "SCANS_ENABLED": "true"
+  },
+  "triggers": {
+    "crons": [
+      "*/30 * * * *"
+    ]
+  },
+  "d1_databases": [
+    {
+      "binding": "DB",
+      "database_name": "itad-notifier",
+      "database_id": "e9f9123a-a8a7-43a0-8116-05d5a7d56db9",
+      "migrations_dir": "migrations"
+    }
+  ],
+  "queues": {
+    "producers": [
+      {
+        "binding": "WORK_QUEUE",
+        "queue": "itad-notifier-jobs"
+      }
+    ],
+    "consumers": [
+      {
+        "queue": "itad-notifier-jobs",
+        "max_batch_size": 1,
+        "max_batch_timeout": 0,
+        "max_retries": 5,
+        "max_concurrency": 1,
+        "retry_delay": 60
+      }
+    ]
+  },
+  "observability": {
+    "enabled": true,
+    "head_sampling_rate": 1
+  }
+}
