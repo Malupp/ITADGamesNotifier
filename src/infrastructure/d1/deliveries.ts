@@ -14,12 +14,12 @@ import {
   money,
 } from "../../telegram/formatters.js";
 
-const validPendingPrice = `EXISTS (SELECT 1 FROM wishlist w LEFT JOIN user_prefs p ON p.user_id=w.user_id
+const validPendingPrice = `((deliveries.source='itad' AND EXISTS (SELECT 1 FROM wishlist w LEFT JOIN user_prefs p ON p.user_id=w.user_id
   WHERE w.user_id=deliveries.wishlist_user_id AND w.game_id=deliveries.game_id
   AND w.last_observed_price_cents=deliveries.price_cents
   AND COALESCE(w.last_notified_price_cents,w.baseline_price_cents)>0
   AND deliveries.price_cents*100 <= COALESCE(w.last_notified_price_cents,w.baseline_price_cents)
-    *(100-MAX(10,COALESCE(w.min_discount_pct,p.min_discount_pct,10))))`;
+    *(100-MAX(10,COALESCE(w.min_discount_pct,p.min_discount_pct,10))))) OR (deliveries.source IN ('keyshop','keydeal') AND EXISTS (SELECT 1 FROM key_alert_state k JOIN key_prices q ON q.game_id=k.game_id LEFT JOIN wishlist w ON w.user_id=k.owner_id AND w.game_id=k.game_id LEFT JOIN user_prefs p ON p.user_id=w.user_id WHERE k.owner_id=deliveries.wishlist_user_id AND k.game_id=deliveries.game_id AND q.app_id=deliveries.key_app_id AND k.generation=deliveries.price_generation AND k.observed=deliveries.price_cents AND q.key_cents=deliveries.price_cents AND q.key_cents>0 AND ((deliveries.source='keyshop' AND k.mode='wishlist' AND w.added_at=k.generation AND COALESCE(k.notified,k.baseline)>0 AND q.key_cents*100<=COALESCE(k.notified,k.baseline)*(100-MAX(10,COALESCE(w.min_discount_pct,p.min_discount_pct,10)))) OR (deliveries.source='keydeal' AND k.mode='general' AND q.key_cents<=1000 AND q.retail_cents>0 AND q.key_cents*2<=q.retail_cents AND (q.key_cents*100<=COALESCE(k.notified,k.baseline)*90 OR (k.notified IS NULL AND (k.baseline IS NULL OR q.key_cents=k.baseline))))))))`;
 
 export class DeliveriesRepository {
   constructor(readonly db: D1Database) {}
@@ -181,14 +181,17 @@ export class DeliveriesRepository {
         )
         .bind(now, delivery.id, delivery.lease_token),
     ];
-    if (delivery.kind === "price")
+    if (
+      delivery.kind === "price" &&
+      (!delivery.source || delivery.source === "itad")
+    )
       statements.push(
         this.db
           .prepare(
             `UPDATE wishlist SET
       last_notified_price_cents=CASE WHEN last_notified_price_cents IS NULL THEN ? ELSE MIN(last_notified_price_cents,?) END,
       last_notified_at=? WHERE user_id=? AND game_id=? AND EXISTS(SELECT 1 FROM deliveries
-        WHERE id=? AND status='sent' AND lease_token=? AND sent_at=?)`,
+        WHERE id=? AND status='sent' AND lease_token=? AND sent_at=? AND (source='itad' OR EXISTS(SELECT 1 FROM key_games g WHERE g.game_id=deliveries.game_id AND g.steam_app_id=deliveries.key_app_id)))`,
           )
           .bind(
             delivery.price_cents,
@@ -196,6 +199,28 @@ export class DeliveriesRepository {
             now,
             delivery.wishlist_user_id,
             delivery.game_id,
+            delivery.id,
+            delivery.lease_token,
+            now,
+          ),
+      );
+    if (
+      delivery.kind === "price" &&
+      delivery.source &&
+      delivery.source !== "itad"
+    )
+      statements.push(
+        this.db
+          .prepare(
+            `UPDATE key_alert_state SET notified=CASE WHEN notified IS NULL THEN ? ELSE MIN(notified,?) END WHERE mode=? AND owner_id=? AND game_id=? AND generation=? AND (mode='general' OR EXISTS(SELECT 1 FROM wishlist w WHERE w.user_id=key_alert_state.owner_id AND w.game_id=key_alert_state.game_id AND w.added_at=key_alert_state.generation)) AND EXISTS(SELECT 1 FROM deliveries WHERE id=? AND status='sent' AND lease_token=? AND sent_at=? AND (source='itad' OR EXISTS(SELECT 1 FROM key_games g WHERE g.game_id=deliveries.game_id AND g.steam_app_id=deliveries.key_app_id)))`,
+          )
+          .bind(
+            delivery.price_cents,
+            delivery.price_cents,
+            delivery.source === "keyshop" ? "wishlist" : "general",
+            delivery.wishlist_user_id,
+            delivery.game_id,
+            delivery.price_generation,
             delivery.id,
             delivery.lease_token,
             now,

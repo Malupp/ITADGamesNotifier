@@ -9,6 +9,10 @@ Ogni comando raccoglie i risultati in un solo messaggio. I pulsanti aggiornano q
 Controllo IsThereAnyDeal e confermo la promozione sul negozio ufficiale: al momento la verifica automatica copre Epic Games Store e Steam. Escludo DLC, demo, weekend gratuiti, free-to-play permanenti e offerte che richiedono abbonamenti a pagamento.
 Apri il link e riscatta il gioco prima della scadenza: il bot non lo riscatta per te. Gli avvisi gratuiti arrivano nelle chat configurate.
 
+🔑 <b>Key a prezzi bassissimi</b>
+/keys — affari della selezione monitorata: massimo 10€ e almeno il 50% sotto il miglior prezzo nei negozi autorizzati. Arrivano anche avvisi nelle chat configurate; per lo stesso gioco attendo almeno un altro ribasso del 10%.
+I prezzi key compaiono anche in /cerca, /confronta, /wishlist e nelle offerte senza filtro negozio, quando disponibili. Fonte: <a href="https://gg.deals/">GG.deals</a>, dati aggiornati circa ogni ora; controllo ogni 30 minuti. Il feed gratuito mostra il minimo aggregato, senza indicare il singolo venditore: apri GG.deals e verifica commissioni, negozio e regione di attivazione prima di acquistare.
+
 📋 <b>La tua wishlist · in chat privata</b>
 /add &lt;titolo&gt; — cerca un gioco, poi premi il pulsante per aggiungerlo.
 /wishlist — mostra i tuoi giochi con i prezzi attuali in un unico messaggio; i pulsanti cambiano pagina nello stesso messaggio.
@@ -19,6 +23,7 @@ Per iniziare, prova <code>/add Hollow Knight</code>.
 Controllo ogni 30 minuti. Per la wishlist invio un avviso solo se c'è un effettivo sconto e almeno il 10% di ulteriore ribasso rispetto all'ultima notifica consegnata, oppure al prezzo iniziale se non hai ancora ricevuto avvisi.
 Esempio con soglia 10%: 10€ → 9€: avviso; 9€ → 8,90€: nessun avviso; 9€ → 8,10€: nuovo avviso. Lo sconto sul prezzo di listino è un dato distinto da questa soglia.
 L'aggiunta e il recupero della wishlist registrano il riferimento senza una raffica di avvisi; se manca il prezzo, attendo la prima osservazione valida. Gli avvisi wishlist arrivano nella tua chat privata. Ricontrollo l'offerta prima dell'invio e ritento gli invii falliti: in casi rari può arrivare un duplicato.
+Per le key uso un riferimento separato dai negozi autorizzati e la stessa soglia globale o per gioco: avviso su un vero ribasso del prezzo della key, senza attribuire uno sconto di listino che il feed non fornisce.
 
 ⚙️ <b>Personalizza gli avvisi · in chat privata</b>
 /setsconto — mostra la soglia globale della wishlist.

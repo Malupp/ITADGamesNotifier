@@ -4,6 +4,7 @@ import { ApiError } from "../infrastructure/http.js";
 import { enabled, backoff, errorCode } from "./retries.js";
 import { publishJobs } from "../runtime/queues.js";
 import { formatGiveaway, formatPrice } from "../telegram/formatters.js";
+import { revalidateKeyDelivery } from "./keys.js";
 import {
   verifyGiveaways,
   confirmOfficialGiveaways,
@@ -33,7 +34,15 @@ export async function processDelivery(
     let text = d.text;
     let previewUrl: string | undefined;
     // Recheck wishlist prices immediately before sending, including rebound/removal.
-    if (d.kind === "price" && d.game_id) {
+    if (d.kind === "price" && d.source && d.source !== "itad") {
+      const current = await revalidateKeyDelivery(context, d, now);
+      if (current === null) {
+        await context.deliveries.expireDelivery(d);
+        return null;
+      }
+      text = current;
+    }
+    if (d.kind === "price" && d.game_id && (!d.source || d.source === "itad")) {
       const quotes = await context.itad.getPrices([d.game_id]);
       const best = (quotes.get(d.game_id) ?? []).sort(
         (a, b) => a.priceCents - b.priceCents,

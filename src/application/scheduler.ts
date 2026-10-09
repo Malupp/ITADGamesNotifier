@@ -1,6 +1,7 @@
 import type { ApplicationContext } from "./context.js";
 import { ApiError } from "../infrastructure/http.js";
 import { enabled } from "./retries.js";
+import { scheduleKeys, publishKeys, keysEnabled } from "./keys.js";
 import {
   publishJobs,
   publishScans,
@@ -10,10 +11,12 @@ export async function schedule(
   context: ApplicationContext,
   now: number,
   initialize = false,
-  part: "all" | "prices" | "giveaways" | "recover" = "all",
+  part: "all" | "prices" | "giveaways" | "recover" | "keys" = "all",
 ): Promise<void> {
   if (!enabled(context) && !initialize) return;
   const scans = context.scans;
+  if (part === "all" || part === "keys")
+    await scheduleKeys(context, now, initialize);
   if (part === "all" || part === "prices") {
     const quiet =
       initialize ||
@@ -52,6 +55,7 @@ export async function schedule(
   }
   if (part === "all" || part === "recover") {
     await publishScans(context, scans, now);
+    if (keysEnabled(context)) await publishKeys(context, now);
     if (enabled(context)) {
       await publishJobs(
         context,
@@ -78,6 +82,24 @@ export async function schedule(
       context.env.DB.prepare(
         "DELETE FROM scan_runs WHERE started_at<? AND status!='running' AND NOT EXISTS(SELECT 1 FROM scan_jobs WHERE run_id=scan_runs.id)",
       ).bind(now - 7 * 86400000),
+      context.env.DB.prepare(
+        "DELETE FROM key_scan_jobs WHERE id IN (SELECT j.id FROM key_scan_jobs j JOIN key_scan_runs r ON r.id=j.run_id WHERE r.status!='running' AND r.started_at<? LIMIT 100)",
+      ).bind(now - 7 * 86400000),
+      context.env.DB.prepare(
+        "DELETE FROM key_scan_runs WHERE started_at<? AND status!='running' AND NOT EXISTS(SELECT 1 FROM key_scan_jobs WHERE run_id=key_scan_runs.id)",
+      ).bind(now - 7 * 86400000),
+      context.env.DB.prepare(
+        "DELETE FROM key_alert_state WHERE mode='wishlist' AND NOT EXISTS(SELECT 1 FROM wishlist w WHERE w.game_id=key_alert_state.game_id AND w.user_id=key_alert_state.owner_id)",
+      ),
+      context.env.DB.prepare(
+        "DELETE FROM key_prices WHERE game_id IN (SELECT game_id FROM key_games WHERE general=0 AND mapped_at<? AND NOT EXISTS(SELECT 1 FROM wishlist w WHERE w.game_id=key_games.game_id))",
+      ).bind(now - 90 * 86400000),
+      context.env.DB.prepare(
+        "DELETE FROM key_alert_state WHERE game_id IN (SELECT game_id FROM key_games WHERE general=0 AND mapped_at<? AND NOT EXISTS(SELECT 1 FROM wishlist w WHERE w.game_id=key_games.game_id))",
+      ).bind(now - 90 * 86400000),
+      context.env.DB.prepare(
+        "DELETE FROM key_games WHERE general=0 AND mapped_at<? AND NOT EXISTS(SELECT 1 FROM wishlist w WHERE w.game_id=key_games.game_id)",
+      ).bind(now - 90 * 86400000),
     ]);
   }
 }

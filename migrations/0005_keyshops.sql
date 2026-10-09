@@ -1,0 +1,14 @@
+ALTER TABLE deliveries ADD COLUMN source TEXT NOT NULL DEFAULT 'itad' CHECK(source IN ('itad','keyshop','keydeal'));
+ALTER TABLE deliveries ADD COLUMN price_generation INTEGER;
+ALTER TABLE deliveries ADD COLUMN key_app_id INTEGER;
+DROP INDEX wishlist_pending_delivery;
+CREATE UNIQUE INDEX wishlist_pending_delivery ON deliveries(source,wishlist_user_id,game_id) WHERE kind='price' AND status IN ('pending','processing');
+CREATE TABLE key_games(game_id TEXT PRIMARY KEY,title TEXT NOT NULL,steam_app_id INTEGER,mapped_at INTEGER NOT NULL,general INTEGER NOT NULL DEFAULT 0);
+CREATE TABLE key_prices(game_id TEXT PRIMARY KEY,app_id INTEGER NOT NULL,key_cents INTEGER,retail_cents INTEGER,gg_retail_cents INTEGER,historical_key_cents INTEGER,historical_retail_cents INTEGER,url TEXT NOT NULL,observed_at INTEGER NOT NULL);
+CREATE TABLE key_alert_state(mode TEXT NOT NULL CHECK(mode IN ('wishlist','general')),owner_id TEXT NOT NULL,game_id TEXT NOT NULL,baseline INTEGER,notified INTEGER,observed INTEGER,generation INTEGER NOT NULL,PRIMARY KEY(mode,owner_id,game_id));
+CREATE TABLE key_budget(id INTEGER PRIMARY KEY CHECK(id=1),minute INTEGER NOT NULL DEFAULT -1,minute_used INTEGER NOT NULL DEFAULT 0,hour INTEGER NOT NULL DEFAULT -1,hour_used INTEGER NOT NULL DEFAULT 0,blocked_until INTEGER NOT NULL DEFAULT 0);
+INSERT INTO key_budget(id) VALUES(1);
+CREATE TABLE key_scan_runs(id TEXT PRIMARY KEY,kind TEXT NOT NULL CHECK(kind='keys'),started_at INTEGER NOT NULL,baseline INTEGER NOT NULL,status TEXT NOT NULL DEFAULT 'running',finished_at INTEGER);
+CREATE UNIQUE INDEX one_active_key_scan ON key_scan_runs(kind) WHERE status='running';
+CREATE TABLE key_scan_jobs(id TEXT PRIMARY KEY,run_id TEXT NOT NULL,payload TEXT NOT NULL,status TEXT NOT NULL DEFAULT 'pending',due_at INTEGER NOT NULL,lease_until INTEGER,lease_token TEXT,attempts INTEGER NOT NULL DEFAULT 0,enqueued_at INTEGER);
+CREATE INDEX key_scan_jobs_due ON key_scan_jobs(status,due_at,lease_until);

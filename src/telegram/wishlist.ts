@@ -2,6 +2,8 @@ import type { ApplicationContext } from "../application/context.js";
 import type { PriceQuote, WishlistItem } from "../domain/models.js";
 import { safeUrl } from "../domain/urls.js";
 import { escapeHtml, formatExpiry, money } from "./formatters.js";
+import { interactiveKeys } from "../application/keys.js";
+import type { KeyPrice } from "../infrastructure/d1/keys.js";
 
 const PAGE_SIZE = 10,
   MAX_TEXT = 3800;
@@ -17,6 +19,7 @@ export function buildWishlistPage(
   items: WishlistItem[],
   prices: Map<string, PriceQuote[]>,
   offset: number,
+  keys: Map<string, KeyPrice> = new Map(),
 ): { text: string; replyMarkup?: unknown; nextOffset: number | null } {
   if (!items.length)
     return {
@@ -27,7 +30,10 @@ export function buildWishlistPage(
   const header = (end: number) =>
     `📋 <b>La tua wishlist</b> · ${offset + 1}–${end} di ${items.length}\n\n`;
   const footer =
-    "\n\nPrezzi da IsThereAnyDeal, richiesti al momento dell’apertura.";
+    "\n\nPrezzi autorizzati da IsThereAnyDeal." +
+    (keys.size
+      ? "\nKey da GG.deals, dati aggiornati circa ogni ora. Verifica negozio, commissioni e attivazione per l’Italia."
+      : " Richiesti al momento dell’apertura.");
   let body = "",
     end = offset;
   for (const item of items.slice(offset, offset + PAGE_SIZE)) {
@@ -46,6 +52,11 @@ export function buildWishlistPage(
       if (quote.expiry !== null)
         unit += `\n⏳ ${formatExpiry(quote.expiry)} (Italia)`;
     }
+    const key = keys.get(item.game_id);
+    if (key?.keyCents)
+      unit += `\n🔑 Minimo key: <b>${money(key.keyCents)}</b> · <a href="${escapeHtml(key.url)}">GG.deals</a>\nRilevato il ${formatExpiry(key.observedAt)} (Italia)`;
+    if (header(end + 1).length + unit.length + footer.length > MAX_TEXT)
+      unit = unit.replace(/\n<a href="[^"]*">Apri offerta<\/a>/, "");
     const candidate = body + (body ? "\n\n" : "") + unit;
     if (
       header(end + 1).length + candidate.length + footer.length > MAX_TEXT &&
@@ -89,7 +100,18 @@ export async function showWishlist(
         items.slice(offset, offset + PAGE_SIZE).map((item) => item.game_id),
       )
     : new Map<string, PriceQuote[]>();
-  const page = buildWishlistPage(items, prices, offset);
+  const keys = await interactiveKeys(
+    context,
+    items
+      .slice(offset, offset + PAGE_SIZE)
+      .map((i) => ({ id: i.game_id, title: i.title, slug: "", type: "game" })),
+    false,
+    prices,
+  );
+  const page = buildWishlistPage(items, prices, offset, keys);
+  const expiresAt = keys.size
+    ? Math.min(...[...keys.values()].map((p) => p.observedAt + 3600000))
+    : undefined;
   const key = `reply:${updateId}:0`;
   if (messageId === undefined)
     await context.deliveries.queueMessage(
@@ -97,6 +119,7 @@ export async function showWishlist(
       chatId,
       page.text,
       page.replyMarkup,
+      expiresAt,
     );
   else
     await context.deliveries.queueEdit(
@@ -106,5 +129,6 @@ export async function showWishlist(
       page.text,
       updateId,
       page.replyMarkup ?? { inline_keyboard: [] },
+      expiresAt,
     );
 }

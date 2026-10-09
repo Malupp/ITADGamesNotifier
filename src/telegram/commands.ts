@@ -4,11 +4,9 @@ import { toCents } from "../domain/pricing.js";
 import { HELP } from "./help.js";
 import { saveView } from "./result-pages.js";
 import { safeUrl } from "../domain/urls.js";
-import {
-  formatExpiry,
-  quoteText,
-  money,
-} from "./formatters.js";
+import { keysEnabled, interactiveKeys } from "../application/keys.js";
+import { keyText } from "../infrastructure/d1/keys.js";
+import { formatExpiry, quoteText, money } from "./formatters.js";
 import {
   SHOPS,
   SHOP_IDS,
@@ -52,8 +50,32 @@ export async function handleCommand(session: BotSession): Promise<void> {
   }
   if (command === "status") {
     const status = await context.settings.status();
+    const keyAt = await context.settings.getSetting("last_key_scan");
     await reply(
-      `Scansione giochi gratuiti: ${status.lastGiveawayScan === null ? "in attesa" : `${formatExpiry(status.lastGiveawayScan)} (Italia)`}\nScansione wishlist: ${status.lastPriceScan === null ? "in attesa" : `${formatExpiry(status.lastPriceScan)} (Italia)`}\nControllo ogni 30 minuti.`,
+      `Scansione giochi gratuiti: ${status.lastGiveawayScan === null ? "in attesa" : `${formatExpiry(status.lastGiveawayScan)} (Italia)`}\nScansione wishlist: ${status.lastPriceScan === null ? "in attesa" : `${formatExpiry(status.lastPriceScan)} (Italia)`}\nKeyshop: ${!keysEnabled(context) ? "non attivi" : keyAt ? formatExpiry(Number(keyAt)) + " (Italia)" : "prima scansione in corso"}\nControllo ogni 30 minuti; GG.deals aggiorna i dati circa ogni ora.`,
+    );
+    return;
+  }
+  if (command === "keys") {
+    if (!keysEnabled(context)) {
+      await reply("🔑 Monitoraggio key non attivo.");
+      return;
+    }
+    const bargains = await context.keys.bargains(context.now());
+    await showList(
+      "🔑 <b>Affari key · Italia, EUR</b>\nMassimo 10€ e almeno 50% sotto il miglior prezzo autorizzato. Selezione monitorata, non l’intero catalogo.",
+      bargains.length
+        ? bargains.map(
+            (p) =>
+              `🎮 <b>${html(p.title, 100)}</b>\n${keyText(p, p.observedAt)}`,
+          )
+        : [
+            "Nessun affare verificato di recente nella selezione. Riprova dopo la prossima scansione.",
+          ],
+      undefined,
+      bargains.length
+        ? Math.min(...bargains.map((p) => p.observedAt + 3600000))
+        : undefined,
     );
     return;
   }
@@ -66,12 +88,25 @@ export async function handleCommand(session: BotSession): Promise<void> {
     else {
       const blocks = offers.map((offer) => {
         const url = safeUrl(offer.url);
-        return `🎮 <b>${html(offer.title, 100)}</b>\n🏪 ${html(offer.shop, 60)} · <b>GRATIS da riscattare</b>` +
-          (offer.expiry === null ? "" : `\n⏳ Scade il ${formatExpiry(offer.expiry)} (Italia)`) +
-          (url && html(url, 10000).length <= 2048 ? `\n<a href="${html(url, 10000)}">Riscatta il gioco</a>` : "");
+        return (
+          `🎮 <b>${html(offer.title, 100)}</b>\n🏪 ${html(offer.shop, 60)} · <b>GRATIS da riscattare</b>` +
+          (offer.expiry === null
+            ? ""
+            : `\n⏳ Scade il ${formatExpiry(offer.expiry)} (Italia)`) +
+          (url && html(url, 10000).length <= 2048
+            ? `\n<a href="${html(url, 10000)}">Riscatta il gioco</a>`
+            : "")
+        );
       });
-      await showList("🎁 <b>Giochi gratis da riscattare</b>", blocks, undefined,
-        Math.min(context.now() + 86400000, ...offers.map((offer) => offer.expiry ?? Infinity)));
+      await showList(
+        "🎁 <b>Giochi gratis da riscattare</b>",
+        blocks,
+        undefined,
+        Math.min(
+          context.now() + 86400000,
+          ...offers.map((offer) => offer.expiry ?? Infinity),
+        ),
+      );
     }
     return;
   }
@@ -91,15 +126,20 @@ export async function handleCommand(session: BotSession): Promise<void> {
     }
     const action = command === "add" ? "addwish" : "price";
     const viewId = String(update.update_id);
-    const page = await saveView(context, viewId, userId, chatId, [{
-      text: command === "add"
-        ? "Quale gioco vuoi aggiungere alla wishlist?"
-        : "Seleziona il gioco per vedere i prezzi:",
-      replyMarkup: keyboard([
-        ...results.map((game) => [button(game.title, `${action}|${game.id}|${viewId}`)]),
-        [button("❌ Annulla", `cancel|${viewId}`)],
-      ]),
-    }]);
+    const page = await saveView(context, viewId, userId, chatId, [
+      {
+        text:
+          command === "add"
+            ? "Quale gioco vuoi aggiungere alla wishlist?"
+            : "Seleziona il gioco per vedere i prezzi:",
+        replyMarkup: keyboard([
+          ...results.map((game) => [
+            button(game.title, `${action}|${game.id}|${viewId}`),
+          ]),
+          [button("❌ Annulla", `cancel|${viewId}`)],
+        ]),
+      },
+    ]);
     await reply(page.text, page.replyMarkup, page.expiresAt);
     return;
   }
@@ -258,6 +298,28 @@ export async function handleCommand(session: BotSession): Promise<void> {
       (a, b) =>
         b.quote.cut - a.quote.cut || a.quote.priceCents - b.quote.priceCents,
     );
-  await showList("🏷️ <b>Offerte trovate</b> · Italia, EUR", deals.map(deal =>
-    `🎮 <b>${html(deal.game.title, 100)}</b>\n${quoteText(deal.quote)}${deal.steamScore === null ? "" : `\n⭐ Review Steam: ${deal.steamScore}%`}`));
+  const keys =
+    command === "offerte"
+      ? await interactiveKeys(
+          context,
+          deals.map((d) => d.game),
+        )
+      : new Map();
+  await showList(
+    "🏷️ <b>Offerte trovate</b> · Italia, EUR",
+    deals.flatMap((deal) => {
+      const block = `🎮 <b>${html(deal.game.title, 100)}</b>\n${quoteText(deal.quote)}${deal.steamScore === null ? "" : `\n⭐ Review Steam: ${deal.steamScore}%`}`;
+      const key = keys.get(deal.game.id);
+      return key?.keyCents
+        ? [
+            block,
+            `🎮 <b>${html(deal.game.title, 100)}</b>\n${keyText(key, key.observedAt)}`,
+          ]
+        : [block];
+    }),
+    undefined,
+    keys.size
+      ? Math.min(...[...keys.values()].map((p) => p.observedAt + 3600000))
+      : undefined,
+  );
 }

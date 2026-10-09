@@ -6,6 +6,7 @@ import { schedule } from "../application/scheduler.js";
 import { processDelivery } from "../application/delivery.js";
 import { processUpdate } from "../application/update.js";
 import { processScan } from "../application/scan-job.js";
+import { processKeyScan } from "../application/keys.js";
 
 export async function processJob(
   job: QueueJob,
@@ -22,6 +23,8 @@ export async function processJob(
       return processUpdate(job.id, context, now);
     case "scan":
       return processScan(job.id, context, now);
+    case "keyscan":
+      return processKeyScan(job.id, context, now);
     case "probe": {
       const started = performance.now();
       const client = job.reviewConcurrency

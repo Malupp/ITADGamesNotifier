@@ -33,7 +33,18 @@ function gameFrom(value: unknown): Game | null {
     typeof data.title === "string" &&
     data.title.length > 0 &&
     typeof data.slug === "string"
-    ? { id: data.id, slug: data.slug, title: data.title, type: data.type }
+    ? {
+        id: data.id,
+        slug: data.slug,
+        title: data.title,
+        type: data.type,
+        ...("appid" in data
+          ? {
+              steamAppId:
+                positiveInt(data.appid) && data.appid > 0 ? data.appid : null,
+            }
+          : {}),
+      }
     : null;
 }
 function cents(value: unknown): number | null {
@@ -141,6 +152,16 @@ export class ItadClient {
       if (error instanceof ApiError && error.status === 404) return null;
       throw error;
     }
+  }
+  async getPopularGames(limit = 100): Promise<Game[]> {
+    const data = await this.call("/stats/most-popular/v1", {
+      limit: String(boundedLimit(limit, 100)),
+    });
+    if (!Array.isArray(data)) throw new ApiError(502);
+    return data
+      .map(gameFrom)
+      .filter((game): game is Game => game !== null)
+      .slice(0, limit);
   }
   async getPrices(ids: string[]): Promise<Map<string, PriceQuote[]>> {
     const result = new Map<string, PriceQuote[]>();
