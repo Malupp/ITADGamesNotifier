@@ -1,23 +1,15 @@
 import type { ApplicationContext } from "../application/context.js";
 import type { Game, TelegramUpdate } from "../domain/models.js";
-import { ApiError } from "../infrastructure/http.js";
-import { money, quoteText } from "./formatters.js";
+import { formatExpiry, quoteText } from "./formatters.js";
 import { showWishlist } from "./wishlist.js";
+import { resultPages, saveView } from "./result-pages.js";
 import {
-  SHOPS,
   SHOP_IDS,
   PAGE_SIZE,
-  UUID,
-  PRIVATE_COMMANDS,
-  COMMANDS,
   html,
   button,
   keyboard,
   cancel,
-  number,
-  percent,
-  priceArg,
-  best,
 } from "./options.js";
 
 export function createSession(
@@ -39,29 +31,34 @@ export function createSession(
       message.chat.type === "private");
   const itad = context.itad;
   let ordinal = 0;
-  const reply = (text: string, markup?: unknown) =>
-    context.deliveries.queueMessage(
-      `reply:${update.update_id}:${ordinal++}`,
-      chatId,
-      text,
-      markup,
-    );
+  const reply = (text: string, markup?: unknown, expiresAt?: number) => {
+    const key = `reply:${update.update_id}:${ordinal++}`;
+    const messageId = callback?.message?.message_id;
+    return messageId === undefined
+      ? context.deliveries.queueMessage(key, chatId, text, markup, expiresAt)
+      : context.deliveries.queueEdit(key, chatId, messageId, text, update.update_id,
+          markup ?? { inline_keyboard: [] }, expiresAt);
+  };
   const privateOnly = () =>
     reply("🔒 Gestisci wishlist e preferenze nella chat privata con il bot.");
 
-  async function showPrices(game: Game, trackedOnly = false) {
+  async function showList(title: string, blocks: string[], backId?: string, expiresAt?: number) {
+    const page = await saveView(context, String(update.update_id), userId, chatId,
+      resultPages(title, blocks), backId, expiresAt);
+    await reply(page.text, page.replyMarkup, page.expiresAt);
+  }
+
+  async function showPrices(game: Game, trackedOnly = false, backId?: string) {
     let quotes = (await itad.getPrices([game.id])).get(game.id) ?? [];
     if (trackedOnly)
       quotes = quotes.filter((quote) => SHOP_IDS.includes(quote.shopId));
     quotes.sort((a, b) => a.priceCents - b.priceCents);
     if (!quotes.length) {
-      await reply(
-        `😔 Nessun prezzo disponibile per <b>${html(game.title)}</b>.`,
-      );
+      await showList("", [`😔 Nessun prezzo disponibile per <b>${html(game.title, 100)}</b>.`], backId);
       return;
     }
-    for (const quote of quotes.slice(0, 8))
-      await reply(`🎮 <b>${html(game.title)}</b>\n${quoteText(quote)}`);
+    await showList(`🎮 <b>${html(game.title, 100)}</b>\nPrezzi rilevati il ${formatExpiry(context.now())} (Italia), EUR`,
+      quotes.map(quoteText), backId);
   }
   async function wishlistPage(
     mode: "wishlist" | "remove" | "discount",
@@ -132,6 +129,7 @@ export function createSession(
     username,
     isPrivate,
     reply,
+    showList,
     privateOnly,
     showPrices,
     wishlistPage,

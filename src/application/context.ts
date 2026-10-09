@@ -9,6 +9,7 @@ import { GiveawaysRepository } from "../infrastructure/d1/giveaways.js";
 import { DeliveriesRepository } from "../infrastructure/d1/deliveries.js";
 import { UpdatesRepository } from "../infrastructure/d1/updates.js";
 import { Scans } from "../infrastructure/d1/scans.js";
+import { ViewsRepository } from "../infrastructure/d1/views.js";
 
 export function createContext(
   env: Env,
@@ -35,6 +36,7 @@ export function createContext(
     fetcher,
     now: options.now ?? Date.now,
     settings: new SettingsRepository(env.DB),
+    views: new ViewsRepository(env.DB),
     preferences: new PreferencesRepository(env.DB),
     wishlist: new WishlistRepository(env.DB),
     giveaways: new GiveawaysRepository(env.DB),

@@ -2,28 +2,21 @@ import type { BotSession } from "./session.js";
 import type { PriceQuote } from "../domain/models.js";
 import { ApiError } from "../infrastructure/http.js";
 import { money } from "./formatters.js";
+import { viewPage } from "./result-pages.js";
 import {
-  SHOPS,
-  SHOP_IDS,
-  PAGE_SIZE,
   UUID,
-  PRIVATE_COMMANDS,
-  COMMANDS,
   html,
   button,
   keyboard,
   cancel,
   number,
   percent,
-  priceArg,
   best,
 } from "./options.js";
 export async function handleCallback(session: BotSession): Promise<void> {
   const {
     context,
-    update,
     callback,
-    message,
     userId,
     chatId,
     username,
@@ -35,12 +28,35 @@ export async function handleCallback(session: BotSession): Promise<void> {
   } = session;
   if (!callback) return;
   // Expired callback acknowledgements never prevent an otherwise valid operation.
-  try {
-    await context.telegram.answerCallback(callback.id);
-  } catch {
-    /* noncritical */
-  }
+  const acknowledge = async (text?: string) => {
+    try { await context.telegram.answerCallback(callback.id, text); }
+    catch { /* noncritical */ }
+  };
   const [action, gameId, value] = (callback.data ?? "").split("|");
+  if (action === "viewpage" || (action === "cancel" && gameId) || ((action === "price" || action === "addwish") && value)) {
+    const viewId = action === "viewpage" || action === "cancel" ? gameId : value;
+    const view = await context.views.get(viewId);
+    if (view && (view.userId !== userId || view.chatId !== chatId)) {
+      await acknowledge("Solo chi ha avviato questa ricerca può usare i pulsanti.");
+      return;
+    }
+    if (!view && !isPrivate) {
+      await acknowledge("Selezione scaduta. Ripeti il comando per aggiornare i risultati.");
+      return;
+    }
+    await acknowledge();
+    if (!view || view.expiresAt <= context.now()) {
+      await reply("ℹ️ Questa selezione è scaduta. Ripeti il comando per aggiornare i risultati.");
+      return;
+    }
+    if (action === "viewpage") {
+      const index = number(value);
+      if (index === null || !Number.isSafeInteger(index)) return;
+      const page = viewPage(view, viewId, index);
+      if (page) await reply(page.text, page.replyMarkup, page.expiresAt);
+      return;
+    }
+  } else await acknowledge();
   if (action === "cancel") {
     await reply("✅ Operazione annullata.");
     return;
@@ -85,7 +101,7 @@ export async function handleCallback(session: BotSession): Promise<void> {
       return;
     }
     if (action === "price") {
-      await showPrices(game);
+      await showPrices(game, false, value);
       return;
     }
     let quote: PriceQuote | null = null;

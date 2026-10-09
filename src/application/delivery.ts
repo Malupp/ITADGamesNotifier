@@ -121,7 +121,7 @@ export async function processDelivery(
       const fallbackId = await context.deliveries.queueMessage(
         `${d.id}:reopen`,
         d.chat_id,
-        "ℹ️ Questo messaggio non è più disponibile. Riapri /wishlist.",
+        "ℹ️ Questo messaggio non è più disponibile. Ripeti il comando (per esempio /wishlist) per riaprirlo.",
       );
       try {
         await publishJobs(

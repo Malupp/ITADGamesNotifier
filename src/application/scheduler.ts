@@ -64,6 +64,7 @@ export async function schedule(
       await flushDeliveries(context, now);
     }
     // Bounded retention, independent of scan integrity; delivery history lasts90d.
+    await context.views.prune(now);
     await context.env.DB.batch([
       context.env.DB.prepare(
         "DELETE FROM telegram_updates WHERE update_id IN (SELECT update_id FROM telegram_updates WHERE status='done' AND created_at<? LIMIT 100)",

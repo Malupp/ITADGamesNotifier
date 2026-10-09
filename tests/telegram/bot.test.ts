@@ -122,7 +122,7 @@ test("search results carry stable UUID callbacks and replies are persisted with 
     assert.equal(rows.length, 1);
     assert.match(rows[0].idempotency_key ?? rows[0].id, /reply:1:0/);
     const markup = JSON.parse(rows[0].reply_markup);
-    assert.equal(markup.inline_keyboard[0][0].callback_data, `price|${id}`);
+    assert.equal(markup.inline_keyboard[0][0].callback_data, `price|${id}|1`);
   } finally {
     h.cleanup();
   }

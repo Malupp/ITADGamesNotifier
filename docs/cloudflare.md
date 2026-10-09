@@ -18,6 +18,8 @@ La creazione della Queue con giurisdizione `eu` è stata rifiutata dalla richies
 
 Il vecchio workflow operativo GitHub è stato disattivato sul ramo remoto `main` dal commit `dd543ebcb8614559877f995c44e45a46c4c1ccd6`. Il nuovo `.github/workflows/main.yml` esegue soltanto CI, senza credenziali di produzione, deploy o scansioni periodiche.
 
+Ricontrollato il 9 ottobre 2026: GitHub Actions è attivo e la CI di `main` è riuscita. La destinazione Telegram configurata è un canale; il bot risulta amministratore con permesso di pubblicazione. È configurato anche un supergruppo. Le scansioni Cloudflare risultano completate e lo storico D1 contiene avvisi giveaway consegnati, senza invii in attesa o chat bloccate al momento del controllo. Non è stato inviato un messaggio di prova al canale.
+
 ## Comportamento e copertura delle fonti
 
 Il notifier cerca giochi PC completi riscattabili dall'Italia e conservabili senza abbonamento obbligatorio. Esclude DLC, demo, prove temporanee, offerte scadute e giochi permanentemente free-to-play. La scoperta usa i giveaway ITAD; l'invio richiede anche un prezzo EUR zero, prezzo regolare positivo, sconto effettivo del 100% nello stesso negozio e conferma ufficiale.

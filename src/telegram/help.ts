@@ -2,6 +2,8 @@ export const HELP = `👋 <b>Benvenuto! Giochi PC gratis e prezzi sotto controll
 
 Ti aiuto a trovare giochi completi da riscattare gratis e a seguire i ribassi dei giochi che desideri. Prezzi in euro per l'Italia; orari e scadenze nel fuso italiano.
 
+Ogni comando raccoglie i risultati in un solo messaggio. I pulsanti aggiornano quel messaggio; quando serve, usa Avanti e Indietro. Nelle ricerche puoi tornare ai titoli per scegliere un altro gioco. Per aggiornare prezzi e risultati, ripeti il comando; le selezioni scadono entro 24 ore.
+
 🎁 <b>Giochi gratis da tenere</b>
 /deals — mostra le promozioni gratuite attive verificate.
 Controllo IsThereAnyDeal e confermo la promozione sul negozio ufficiale: al momento la verifica automatica copre Epic Games Store e Steam. Escludo DLC, demo, weekend gratuiti, free-to-play permanenti e offerte che richiedono abbonamenti a pagamento.

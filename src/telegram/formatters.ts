@@ -40,9 +40,9 @@ export function quoteText(quote: PriceQuote): string {
   const url = safeUrl(quote.url);
   const price = quote.priceCents === 0 ? "GRATIS" : money(quote.priceCents);
   return (
-    `🏪 ${html(quote.shop, 100)} — <b>${price}</b>` +
+    `🏪 ${html(quote.shop, 60)} — <b>${price}</b>` +
     (quote.cut > 0 ? ` (-${quote.cut}%)` : "") +
-    (url && url.length <= 2048
+    (url && url.length <= 2048 && escapeHtml(url).length <= 2048
       ? `\n🔗 <a href="${escapeHtml(url)}">Vedi l'offerta</a>`
       : "") +
     (quote.expiry === null

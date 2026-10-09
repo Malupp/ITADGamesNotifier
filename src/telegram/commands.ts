@@ -2,33 +2,28 @@ import type { BotSession } from "./session.js";
 import type { Preferences } from "../domain/models.js";
 import { toCents } from "../domain/pricing.js";
 import { HELP } from "./help.js";
+import { saveView } from "./result-pages.js";
+import { safeUrl } from "../domain/urls.js";
 import {
   formatExpiry,
-  formatGiveaway,
   quoteText,
   money,
 } from "./formatters.js";
 import {
   SHOPS,
   SHOP_IDS,
-  PAGE_SIZE,
-  UUID,
   PRIVATE_COMMANDS,
   COMMANDS,
   html,
   button,
   keyboard,
-  cancel,
-  number,
   percent,
   priceArg,
-  best,
 } from "./options.js";
 export async function handleCommand(session: BotSession): Promise<void> {
   const {
     context,
     update,
-    callback,
     message,
     userId,
     chatId,
@@ -37,6 +32,7 @@ export async function handleCommand(session: BotSession): Promise<void> {
     reply,
     privateOnly,
     showPrices,
+    showList,
     wishlistPage,
   } = session;
   const match = /^\/([a-z_]+)(?:@[\w]+)?(?:\s+(.*))?$/is.exec(
@@ -51,7 +47,7 @@ export async function handleCommand(session: BotSession): Promise<void> {
     return;
   }
   if (command === "start" || command === "help") {
-    await reply(HELP);
+    await showList("", HELP.split("\n\n"));
     return;
   }
   if (command === "status") {
@@ -62,12 +58,21 @@ export async function handleCommand(session: BotSession): Promise<void> {
     return;
   }
   if (command === "deals") {
-    const offers = await context.giveaways.getGiveaways();
+    const offers = await context.giveaways.getAllGiveaways(context.now());
     if (!offers.length)
       await reply(
         "😔 Nessun gioco completo gratuito da riscattare al momento.",
       );
-    else for (const offer of offers) await reply(formatGiveaway(offer));
+    else {
+      const blocks = offers.map((offer) => {
+        const url = safeUrl(offer.url);
+        return `🎮 <b>${html(offer.title, 100)}</b>\n🏪 ${html(offer.shop, 60)} · <b>GRATIS da riscattare</b>` +
+          (offer.expiry === null ? "" : `\n⏳ Scade il ${formatExpiry(offer.expiry)} (Italia)`) +
+          (url && html(url, 10000).length <= 2048 ? `\n<a href="${html(url, 10000)}">Riscatta il gioco</a>` : "");
+      });
+      await showList("🎁 <b>Giochi gratis da riscattare</b>", blocks, undefined,
+        Math.min(context.now() + 86400000, ...offers.map((offer) => offer.expiry ?? Infinity)));
+    }
     return;
   }
   if (["cerca", "add", "confronta"].includes(command)) {
@@ -85,15 +90,17 @@ export async function handleCommand(session: BotSession): Promise<void> {
       return;
     }
     const action = command === "add" ? "addwish" : "price";
-    await reply(
-      command === "add"
+    const viewId = String(update.update_id);
+    const page = await saveView(context, viewId, userId, chatId, [{
+      text: command === "add"
         ? "Quale gioco vuoi aggiungere alla wishlist?"
         : "Seleziona il gioco per vedere i prezzi:",
-      keyboard([
-        ...results.map((game) => [button(game.title, `${action}|${game.id}`)]),
-        cancel,
+      replyMarkup: keyboard([
+        ...results.map((game) => [button(game.title, `${action}|${game.id}|${viewId}`)]),
+        [button("❌ Annulla", `cancel|${viewId}`)],
       ]),
-    );
+    }]);
+    await reply(page.text, page.replyMarkup, page.expiresAt);
     return;
   }
   if (
@@ -251,8 +258,6 @@ export async function handleCommand(session: BotSession): Promise<void> {
       (a, b) =>
         b.quote.cut - a.quote.cut || a.quote.priceCents - b.quote.priceCents,
     );
-  for (const deal of deals)
-    await reply(
-      `🎮 <b>${html(deal.game.title)}</b>\n${quoteText(deal.quote)}${deal.steamScore === null ? "" : `\n⭐ Review Steam: ${deal.steamScore}%`}`,
-    );
+  await showList("🏷️ <b>Offerte trovate</b> · Italia, EUR", deals.map(deal =>
+    `🎮 <b>${html(deal.game.title, 100)}</b>\n${quoteText(deal.quote)}${deal.steamScore === null ? "" : `\n⭐ Review Steam: ${deal.steamScore}%`}`));
 }
