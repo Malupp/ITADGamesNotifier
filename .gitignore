@@ -217,3 +217,11 @@ __marimo__/
 # Streamlit
 .streamlit/secrets.toml
 state.json
+# Cloudflare development and private migration artifacts
+node_modules/
+.wrangler/
+.dev.vars
+.dev.vars.*
+migration-private/
+.superpowers/
+.worktrees/

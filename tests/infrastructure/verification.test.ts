@@ -1,0 +1,166 @@
+import test from "node:test";
+import assert from "node:assert/strict";
+import {
+  verifyGiveaways,
+  confirmOfficialGiveaways,
+} from "../../src/infrastructure/stores/verification.js";
+const now = Date.parse("2026-10-08T12:00:00Z");
+const offer = {
+  id: "itad:1:g",
+  gameId: "g",
+  slug: "game",
+  title: "Game",
+  shop: "Epic Game Store",
+  url: "https://store.epicgames.com/p/game-123",
+  expiry: now + 60000,
+};
+const quote = {
+  gameId: "g",
+  shop: "Epic Games Store",
+  shopId: 16,
+  url: offer.url,
+  priceCents: 0,
+  regularCents: 1000,
+  cut: 100,
+  currency: "EUR",
+  expiry: null,
+};
+test("same store Italian EUR100% sale rejects F2P/unknown currency and other stores", () => {
+  assert.equal(verifyGiveaways([offer], new Map([["g", [quote]]])).length, 1);
+  for (const patch of [
+    { regularCents: 0 },
+    { currency: "USD" },
+    { shop: "Prime Gaming" },
+    { priceCents: 1 },
+  ])
+    assert.equal(
+      verifyGiveaways([offer], new Map([["g", [{ ...quote, ...patch }]]]))
+        .length,
+      0,
+    );
+});
+const epic = (patch: any = {}) => ({
+  data: {
+    Catalog: {
+      searchStore: {
+        elements: [
+          {
+            offerType: "BASE_GAME",
+            catalogNs: { mappings: [{ pageSlug: "game-123" }] },
+            price: {
+              totalPrice: {
+                discountPrice: 0,
+                originalPrice: 1000,
+                currencyCode: "EUR",
+              },
+            },
+            promotions: {
+              promotionalOffers: [
+                {
+                  promotionalOffers: [
+                    {
+                      startDate: "2026-10-08T00:00:00Z",
+                      endDate: "2026-10-09T00:00:00Z",
+                      discountSetting: { discountPercentage: 0 },
+                    },
+                  ],
+                },
+              ],
+            },
+            ...patch,
+          },
+        ],
+      },
+    },
+  },
+});
+test("Epic official Italy source confirms exact slug, active claim and full game", async () => {
+  let called = "";
+  const fetcher = async (url: any) => {
+    called = String(url);
+    return Response.json(epic());
+  };
+  assert.equal(
+    (await confirmOfficialGiveaways([offer], fetcher as typeof fetch, now))
+      .length,
+    1,
+  );
+  assert.match(called, /country=IT/);
+  for (const patch of [
+    { offerType: "ADD_ON" },
+    { catalogNs: { mappings: [{ pageSlug: "other" }] } },
+    { promotions: null },
+    {
+      price: {
+        totalPrice: {
+          discountPrice: 1,
+          originalPrice: 1000,
+          currencyCode: "EUR",
+        },
+      },
+    },
+  ])
+    assert.equal(
+      (
+        await confirmOfficialGiveaways(
+          [offer],
+          (async () => Response.json(epic(patch))) as typeof fetch,
+          now,
+        )
+      ).length,
+      0,
+    );
+});
+test("unknown official provider fails closed and Steam excludes permanent F2P", async () => {
+  assert.equal(
+    (
+      await confirmOfficialGiveaways(
+        [{ ...offer, shop: "GOG" }],
+        (async () => {
+          throw Error("must not call");
+        }) as typeof fetch,
+        now,
+      )
+    ).length,
+    0,
+  );
+  const steam = {
+    ...offer,
+    shop: "Steam",
+    url: "https://store.steampowered.com/app/12345/game",
+  };
+  const data = {
+    type: "game",
+    is_free: false,
+    price_overview: {
+      currency: "EUR",
+      initial: 1000,
+      final: 0,
+      discount_percent: 100,
+    },
+  };
+  assert.equal(
+    (
+      await confirmOfficialGiveaways(
+        [steam],
+        (async () =>
+          Response.json({ "12345": { success: true, data } })) as typeof fetch,
+        now,
+      )
+    ).length,
+    1,
+  );
+  assert.equal(
+    (
+      await confirmOfficialGiveaways(
+        [steam],
+        (async () =>
+          Response.json({
+            "12345": { success: true, data: { ...data, is_free: true } },
+          })) as typeof fetch,
+        now,
+      )
+    ).length,
+    0,
+  );
+});

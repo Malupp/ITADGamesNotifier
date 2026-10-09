@@ -1,13 +1,43 @@
-name: Legacy notifier disabled
+name: Verify Cloudflare Worker
 
 on:
+  push:
+    branches: [main]
+  pull_request:
   workflow_dispatch:
 
 permissions:
   contents: read
 
 jobs:
-  disabled:
+  verify:
     runs-on: ubuntu-latest
     steps:
-      - run: echo "Production scheduling moved to Cloudflare Workers."
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+
+      - name: Install locked dependencies
+        run: npm ci
+
+      - name: Test Worker and migration
+        run: npm test
+
+      - name: Typecheck Worker
+        run: npm run typecheck
+
+      - name: Build without deploying
+        run: npm run build
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Test private legacy exporter without PostgreSQL access
+        run: python -m unittest discover -s tests/migration -p test_export_legacy.py
