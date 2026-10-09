@@ -35,6 +35,7 @@ export const COMMANDS = new Set([
   "start",
   "help",
   "deals",
+  "keys",
   "cerca",
   "add",
   "remove",

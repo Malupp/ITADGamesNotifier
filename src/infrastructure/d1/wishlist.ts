@@ -67,6 +67,11 @@ export class WishlistRepository {
           "UPDATE deliveries SET status='expired' WHERE kind='price' AND wishlist_user_id=? AND game_id=? AND status='pending'",
         )
         .bind(userId, gameId),
+      this.db
+        .prepare(
+          "DELETE FROM key_alert_state WHERE mode='wishlist' AND owner_id=? AND game_id=?",
+        )
+        .bind(userId, gameId),
     ]);
     return results[0].meta.changes > 0;
   }
@@ -120,7 +125,7 @@ export class WishlistRepository {
         : []),
       this.db
         .prepare(
-          `UPDATE deliveries SET status='expired' WHERE kind='price' AND status='pending'
+          `UPDATE deliveries SET status='expired' WHERE kind='price' AND source='itad' AND status='pending'
         AND EXISTS(SELECT 1 FROM json_each(?) q WHERE json_extract(q.value,'$.gameId')=deliveries.game_id
           AND (json_extract(q.value,'$.priceCents')!=deliveries.price_cents OR NOT json_extract(q.value,'$.sale')))`,
         )
@@ -137,7 +142,7 @@ export class WishlistRepository {
           AND json_extract(q.value,'$.priceCents')*100 <= COALESCE(w.last_notified_price_cents,w.baseline_price_cents)
             *(100-MAX(10,COALESCE(w.min_discount_pct,p.min_discount_pct,10)))
           AND NOT EXISTS(SELECT 1 FROM blocked_chats WHERE chat_id=w.user_id)
-          AND NOT EXISTS(SELECT 1 FROM deliveries d WHERE d.kind='price' AND d.wishlist_user_id=w.user_id AND d.game_id=w.game_id AND d.status IN ('pending','processing'))
+          AND NOT EXISTS(SELECT 1 FROM deliveries d WHERE d.kind='price' AND d.source='itad' AND d.wishlist_user_id=w.user_id AND d.game_id=w.game_id AND d.status IN ('pending','processing'))
         ON CONFLICT(id) DO UPDATE SET status='pending',due_at=excluded.due_at,expires_at=excluded.expires_at,
           text=excluded.text,lease_until=NULL,lease_token=NULL,attempts=0,error_code=NULL WHERE deliveries.status='expired'`,
         )
@@ -162,7 +167,7 @@ export class WishlistRepository {
         .bind(now, JSON.stringify(gameIds)),
       this.db
         .prepare(
-          `UPDATE deliveries SET status='expired' WHERE kind='price' AND status='pending' AND game_id IN (SELECT value FROM json_each(?))`,
+          `UPDATE deliveries SET status='expired' WHERE kind='price' AND source='itad' AND status='pending' AND game_id IN (SELECT value FROM json_each(?))`,
         )
         .bind(JSON.stringify(gameIds)),
     ]);

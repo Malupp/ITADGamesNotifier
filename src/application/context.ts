@@ -10,6 +10,9 @@ import { DeliveriesRepository } from "../infrastructure/d1/deliveries.js";
 import { UpdatesRepository } from "../infrastructure/d1/updates.js";
 import { Scans } from "../infrastructure/d1/scans.js";
 import { ViewsRepository } from "../infrastructure/d1/views.js";
+import { KeysRepository } from "../infrastructure/d1/keys.js";
+import { KeyScans } from "../infrastructure/d1/key-scans.js";
+import { GgClient } from "../infrastructure/gg/client.js";
 
 export function createContext(
   env: Env,
@@ -43,6 +46,9 @@ export function createContext(
     deliveries: new DeliveriesRepository(env.DB),
     updates: new UpdatesRepository(env.DB),
     scans: new Scans(env.DB),
+    keys: new KeysRepository(env.DB),
+    keyScans: new KeyScans(env.DB),
+    gg: new GgClient(env.GGDEALS_API_KEY ?? "", fetcher),
     itad: new ItadClient(env.ITAD_API_KEY, fetcher, {
       reviewConcurrency: env.REVIEW_CONCURRENCY === "2" ? 2 : 1,
       measureRequest: (action) => measure("itad", action, recordTiming),

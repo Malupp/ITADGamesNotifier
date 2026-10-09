@@ -75,3 +75,15 @@ createContext compone dipendenze esplicite e permette fetcher e clock distinti n
 Workers usa isolate V8, non un container che va in sleep. Attesa in Queue, rete ITAD, D1 e Telegram possono comunque rallentare un comando. La separazione elimina la contesa con le scansioni sulla stessa Queue; un comando interattivo lento può ancora far attendere gli altri comandi. [Runtime Workers](https://developers.cloudflare.com/workers/reference/how-workers-works/).
 
 La telemetria registra solo stage, durata e outcome; distingue prima attesa e retry. La query diagnostica aggrega i tempi tra ricezione webhook, preparazione e conferma Telegram, senza emettere record personali. Non confondere /health o CPU con la latenza completa. Le recensioni hanno concorrenza configurabile 1 o 2, tetto dieci richieste, risultati nell'ordine originale e nessun ritorno parziale su errore. Il default del client e di questa installazione resta 1: il confronto remoto migliora il tempo con 2 ma non dimostra un margine CPU stabile (vedi runbook).
+
+## Pipeline keyshop
+
+`application/keys.ts` coordina un terzo flusso di scansione indipendente: scoperta giornaliera → metadati di un gioco per job → prezzi a gruppi di 20. `infrastructure/gg/client.ts` normalizza il contratto gratuito GG.deals (ID Steam, regione it, EUR); i giochi senza un app ID verificato non vengono associati per titolo. I metadati, comprese le assenze, scadono dopo sette giorni.
+
+`infrastructure/d1/key-scans.ts` conserva run, lease e successori prima della pubblicazione su Queue. `keys.ts` conserva mapping, cache prezzi, budget API e riferimenti degli avvisi; la migrazione 0005 aggiunge solo tabelle, colonne e indici. Il budget GG è condiviso e atomico: massimo 100 record/minuto e 900/ora, sotto il tetto documentato di 1000/ora. Un 429 sospende le richieste successive e conserva lo stato.
+
+Il prezzo autorizzato di confronto è il minimo corrente fra ITAD e GG retail: uno zero autorizzato esclude un affare key a pagamento. Un gruppo di 20 giochi usa al massimo sei query SQL aggregate, evitando il limite D1 Free di 50 query per invocazione. I prezzi mancanti invalidano gli avvisi pendenti; errori di fonte non avanzano i riferimenti. I comandi riutilizzano cache recente o ricontrollano le fonti, senza modificare la baseline silenziosa.
+
+La outbox distingue `itad`, `keyshop` e `keydeal`, pur mantenendo il kind `price` già esistente. Le key conservano anche la generazione dell’inserimento wishlist: una vecchia consegna non può modificare il riferimento dopo rimozione e riaggiunta. La conferma aggiorna soltanto lo stato della fonte corrispondente. Prima di ogni invio si rileggono prezzi e criteri correnti, wishlist e preferenze; uno sconto rimbalzato viene scartato e un errore esterno viene ritentato.
+
+`/keys` e gli altri risultati con key usano la paginazione esistente e scadono entro un’ora dalla più vecchia osservazione mostrata. Non viene inventato il nome del venditore né una percentuale di sconto sul listino delle key: il feed restituisce prezzi minimi, non questi dettagli. Gli avvisi gratuiti mantengono la verifica ufficiale e le anteprime.

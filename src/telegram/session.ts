@@ -3,6 +3,8 @@ import type { Game, TelegramUpdate } from "../domain/models.js";
 import { formatExpiry, quoteText } from "./formatters.js";
 import { showWishlist } from "./wishlist.js";
 import { resultPages, saveView } from "./result-pages.js";
+import { interactiveKeys, keysEnabled } from "../application/keys.js";
+import { keyText } from "../infrastructure/d1/keys.js";
 import {
   SHOP_IDS,
   PAGE_SIZE,
@@ -36,29 +38,69 @@ export function createSession(
     const messageId = callback?.message?.message_id;
     return messageId === undefined
       ? context.deliveries.queueMessage(key, chatId, text, markup, expiresAt)
-      : context.deliveries.queueEdit(key, chatId, messageId, text, update.update_id,
-          markup ?? { inline_keyboard: [] }, expiresAt);
+      : context.deliveries.queueEdit(
+          key,
+          chatId,
+          messageId,
+          text,
+          update.update_id,
+          markup ?? { inline_keyboard: [] },
+          expiresAt,
+        );
   };
   const privateOnly = () =>
     reply("🔒 Gestisci wishlist e preferenze nella chat privata con il bot.");
 
-  async function showList(title: string, blocks: string[], backId?: string, expiresAt?: number) {
-    const page = await saveView(context, String(update.update_id), userId, chatId,
-      resultPages(title, blocks), backId, expiresAt);
+  async function showList(
+    title: string,
+    blocks: string[],
+    backId?: string,
+    expiresAt?: number,
+  ) {
+    const page = await saveView(
+      context,
+      String(update.update_id),
+      userId,
+      chatId,
+      resultPages(title, blocks),
+      backId,
+      expiresAt,
+    );
     await reply(page.text, page.replyMarkup, page.expiresAt);
   }
 
   async function showPrices(game: Game, trackedOnly = false, backId?: string) {
-    let quotes = (await itad.getPrices([game.id])).get(game.id) ?? [];
+    const official = await itad.getPrices([game.id]);
+    let quotes = official.get(game.id) ?? [];
     if (trackedOnly)
       quotes = quotes.filter((quote) => SHOP_IDS.includes(quote.shopId));
     quotes.sort((a, b) => a.priceCents - b.priceCents);
-    if (!quotes.length) {
-      await showList("", [`😔 Nessun prezzo disponibile per <b>${html(game.title, 100)}</b>.`], backId);
+    const key = (await interactiveKeys(context, [game], true, official)).get(
+      game.id,
+    );
+    if (!quotes.length && !key?.keyCents) {
+      await showList(
+        "",
+        [`😔 Nessun prezzo disponibile per <b>${html(game.title, 100)}</b>.`],
+        backId,
+      );
       return;
     }
-    await showList(`🎮 <b>${html(game.title, 100)}</b>\nPrezzi rilevati il ${formatExpiry(context.now())} (Italia), EUR`,
-      quotes.map(quoteText), backId);
+    await showList(
+      `🎮 <b>${html(game.title, 100)}</b>\nPrezzi rilevati il ${formatExpiry(context.now())} (Italia), EUR`,
+      [
+        ...(key?.keyCents
+          ? [keyText(key, key.observedAt)]
+          : keysEnabled(context)
+            ? ["🔑 Prezzi key non disponibili al momento per questo gioco."]
+            : []),
+        ...quotes.map(quoteText),
+      ],
+      backId,
+      key
+        ? Math.min(context.now() + 86400000, key.observedAt + 3600000)
+        : undefined,
+    );
   }
   async function wishlistPage(
     mode: "wishlist" | "remove" | "discount",

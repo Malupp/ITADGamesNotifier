@@ -8,6 +8,7 @@ export interface Env {
   TELEGRAM_CHAT_ID?: string;
   TELEGRAM_CHAT_GROUP?: string;
   GGDEALS_API_KEY?: string;
+  KEYSHOPS_ENABLED?: string;
   SCANS_ENABLED?: string;
   REVIEW_CONCURRENCY?: string;
 }
@@ -15,11 +16,12 @@ export interface Env {
 export type QueueJob =
   | {
       kind: "tick";
-      part: "prices" | "giveaways" | "recover";
+      part: "prices" | "giveaways" | "recover" | "keys";
       scheduledAt: number;
       initialize: boolean;
     }
   | { kind: "probe"; scenario: "deals" | "prices"; reviewConcurrency?: 1 | 2 }
   | { kind: "scan"; id: string }
+  | { kind: "keyscan"; id: string }
   | { kind: "delivery"; id: string }
   | { kind: "update"; id: number };

@@ -2,6 +2,7 @@ import type { ApplicationContext } from "../application/context.js";
 import type { QueueJob } from "./bindings.js";
 import { enabled } from "../application/retries.js";
 import { Scans } from "../infrastructure/d1/scans.js";
+import { keysEnabled } from "../application/keys.js";
 export async function sendJobs(
   context: ApplicationContext,
   jobs: QueueJob[],
@@ -45,7 +46,14 @@ export async function enqueueTick(
   if (!enabled(context) && !initialize) return;
   await sendJobs(
     context,
-    (["prices", "giveaways", "recover"] as const).map((part) => ({
+    (
+      [
+        "prices",
+        "giveaways",
+        "recover",
+        ...(keysEnabled(context) ? ["keys" as const] : []),
+      ] as const
+    ).map((part) => ({
       kind: "tick",
       part,
       scheduledAt: now,

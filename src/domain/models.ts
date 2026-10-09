@@ -1,4 +1,5 @@
 export interface Game {
+  steamAppId?: number | null;
   id: string;
   slug: string;
   title: string;
@@ -62,6 +63,9 @@ export interface TelegramUpdate {
   };
 }
 export interface Delivery {
+  source?: "itad" | "keyshop" | "keydeal";
+  price_generation?: number | null;
+  key_app_id?: number | null;
   operation: "send" | "edit";
   telegram_message_id: number | null;
   view_revision: number | null;

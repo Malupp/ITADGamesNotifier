@@ -2,6 +2,7 @@ import type { ApplicationContext } from "../application/context.js";
 import type { TelegramUpdate } from "../domain/models.js";
 import { enabled } from "../application/retries.js";
 import { enqueueTick, sendJobs } from "./queues.js";
+import { keysEnabled } from "../application/keys.js";
 export async function handleRequest(
   request: Request,
   context: ApplicationContext,
@@ -24,6 +25,11 @@ export async function handleRequest(
           (await context.settings.getSetting("prices_seeded")) === "true",
         giveawaysSeeded:
           (await context.settings.getSetting("giveaways_seeded")) === "true",
+        keysEnabled: keysEnabled(context),
+        keysSeeded:
+          (await context.settings.getSetting("keys_seeded")) === "true",
+        lastKeyScan: await context.settings.getSetting("last_key_scan"),
+        lastKeyError: await context.settings.getSetting("last_key_error"),
       });
     }
     if (path === "/admin/scan" && request.method === "POST") {
