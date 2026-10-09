@@ -16,6 +16,10 @@ import {
 
 export class GiveawaysRepository {
   constructor(readonly db: D1Database) {}
+  async getAllGiveaways(now = Date.now()): Promise<Offer[]> {
+    // SQLite LIMIT -1 removes the row cap; the UI paginates complete results.
+    return this.getGiveaways(now, -1);
+  }
   async getGiveaways(now = Date.now(), limit = 10): Promise<Offer[]> {
     const rows = await this.db
       .prepare(

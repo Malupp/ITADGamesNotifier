@@ -48,6 +48,10 @@ Le reply sono instradate sulla Queue interattiva; avvisi prezzi/giveaway e scans
 
 Le pagine wishlist contengono al massimo dieci giochi e HTML entro 3800 caratteri. I prezzi vengono richiesti all'apertura di ogni pagina. Il callback conserva chat e proprietario, accoda una edit persistita verso il message_id esistente e usa update_id come revisione. Un'edit superata da una revisione più recente viene scartata. Telegram «message is not modified» conta come successo; un messaggio eliminato produce un solo invito a riaprire /wishlist. 429 conserva retry_after e 403 mette in quarantena la destinazione.
 
+Anche ricerca, confronto prezzi, offerte, giochi gratis, aggiunta, rimozione e scelta delle soglie usano un messaggio per operazione. `telegram/result-pages.ts` raggruppa blocchi HTML completi entro 3800 caratteri e aggiunge navigazione; `session.reply` invia per i comandi e modifica il messaggio ricevuto per i callback, rimuovendo i pulsanti quando l'operazione termina. La ricerca conserva una pagina di scelta, richiamabile con «Torna ai titoli».
+
+`infrastructure/d1/views.ts` conserva snapshot temporanei delle pagine nello spazio `telegram_view:` della tabella settings, senza migrazioni o cambi ai dati della wishlist. Ogni snapshot è legato a utente e chat, scade entro 24 ore e viene eliminato dal recupero periodico (massimo 100 per esecuzione). I giochi gratis scadono anche alla prima scadenza inclusa. La navigazione di prezzi e offerte mantiene lo snapshot: per richiedere dati aggiornati si ripete il comando. Nei gruppi i pulsanti delle nuove ricerche funzionano solo per l'autore; dopo la rimozione dello snapshot un pulsante non può modificare il messaggio del gruppo. Gli avvisi automatici mantengono identità, retry e anteprime per ciascuna promozione.
+
 La baseline prezzo cambia soltanto dopo un avviso consegnato. Il 10% riguarda l'ulteriore ribasso, oltre allo sconto reale del negozio: 100 → 90 → 89 → 81 avvisa a 90 e 81. Gli aumenti non alzano il riferimento. Prima della prima consegna si usa la baseline silenziosa recuperata.
 
 ## Dove modificare cosa

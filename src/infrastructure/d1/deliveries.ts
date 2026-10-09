@@ -30,6 +30,7 @@ export class DeliveriesRepository {
     text: string,
     revision: number,
     replyMarkup?: unknown,
+    expiresAt?: number,
   ): Promise<string> {
     if (
       !Number.isSafeInteger(messageId) ||
@@ -50,7 +51,7 @@ export class DeliveriesRepository {
         text,
         replyMarkup == null ? null : JSON.stringify(replyMarkup),
         now,
-        now + 86400000,
+        expiresAt ?? now + 86400000,
         messageId,
         revision,
       )
