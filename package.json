@@ -7,12 +7,12 @@
     "node": ">=22.0.0"
   },
   "scripts": {
-    "test": "tsx --test tests/*.test.ts",
+    "test": "node scripts/run-tests.mjs",
     "typecheck": "tsc --noEmit",
     "dev": "wrangler dev",
     "build": "wrangler deploy --dry-run",
     "deploy": "wrangler deploy",
-    "benchmark": "tsx scripts/benchmark.ts",
+    "benchmark": "tsx scripts/diagnostics/benchmark.ts",
     "db:local": "wrangler d1 migrations apply itad-notifier --local",
     "db:remote": "wrangler d1 migrations apply itad-notifier --remote"
   },

@@ -8,7 +8,8 @@ Il Worker risponde su [itad-games-notifier.luppinomanuel.workers.dev](https://it
 | --- | --- |
 | Worker | `itad-games-notifier` |
 | D1 | `itad-notifier`, ID `e9f9123a-a8a7-43a0-8116-05d5a7d56db9` |
-| Queue | `itad-notifier-jobs`, giurisdizione predefinita |
+| Queue background | `itad-notifier-jobs`, giurisdizione predefinita |
+| Queue interattiva | `itad-notifier-interactions`, stesso account Free |
 | Frequenza | `*/30 * * * *`, ogni 30 minuti; scansioni sospese finché il flag è false |
 | Dati migrati | 16 righe wishlist, 2 preferenze utente, 10 marcatori storici |
 | Primo seed silenzioso | 5 scan-job completati, 2 giveaway verificati, 0 notifiche |
@@ -53,7 +54,7 @@ Occorrono Node 22 e Python 3.11 o successivi. Gli unit test Python non richiedon
 npm ci
 npm test
 npm run typecheck
-python -m unittest discover -s tests -p test_export_legacy.py
+python -m unittest discover -s tests/migration -p test_export_legacy.py
 npm run db:local
 npm run build
 npm run benchmark
@@ -86,8 +87,8 @@ Usare un secret webhook casuale e distinto dal token del bot. `/health` è pubbl
 2. Esportare PostgreSQL con transazione read-only `REPEATABLE READ` e fondere i marcatori dello `state.json` ROOT. Sostituire i percorsi dell'esempio senza inserire password o DSN nei comandi:
 
 ```powershell
-python scripts/export_legacy.py --env-file "C:/percorso/legacy/.env" --state "C:/percorso/legacy/state.json" --output migration-private/legacy-final.json
-npx tsx scripts/import_legacy.ts --input migration-private/legacy-final.json --output migration-private/import-final.sql
+python scripts/migration/export_legacy.py --env-file "C:/percorso/legacy/.env" --state "C:/percorso/legacy/state.json" --output migration-private/legacy-final.json
+npx tsx scripts/migration/import_legacy.ts --input migration-private/legacy-final.json --output migration-private/import-final.sql
 npx wrangler d1 execute itad-notifier --remote --file migration-private/import-final.sql
 ```
 
@@ -127,7 +128,7 @@ Il budget applicativo limita la wishlist a **200 giochi distinti** nell'intera i
 
 Il consumer prende un solo messaggio per invocazione, ogni lavoro prezzo contiene al massimo 10 ID e le pagine giveaway un record per lavoro. D1 conserva job e outbox per recuperare errori; update ID Telegram e lease riducono duplicati e concorrenza. Un invio riuscito con esito incerto prima della registrazione può essere ripetuto: questo rischio è stato accettato. Il riferimento prezzo avanza solo dopo il successo registrato; un destinatario che blocca il bot non blocca gli altri.
 
-La prima verifica remota ha mostrato CPU **3,554–8,956 ms** nelle metriche GraphQL e **3–8 ms** nei trace tail, senza errori nel seed osservato. I valori GraphQL erano microsecondi, convertiti dividendo per 1.000. Le verifiche successive prima dell'ottimizzazione hanno rilevato picchi di 18,741 ms nei consumer e 14,381 ms sul trigger, senza errori di risorse. Lo scheduler è stato quindi suddiviso in tre lavori indipendenti (prezzi, giveaway, recupero), con pubblicazione tracciata e pagine giveaway singole. HTTP e Cron ora accodano soltanto tre piccoli messaggi; i lavori funzionano anche se arrivano in ordine diverso. Il costo fisso aggiuntivo è circa 432 operazioni Queue/giorno. Dopo la suddivisione, il ciclo ordinario è terminato senza job pendenti e senza errori di risorse: trigger HTTP 2,283 ms, picco osservato nei lavori 10,499 ms (prima 18,741 ms). Un picco occasionale non equivale a una garanzia che ogni invocazione resti sotto 10 ms; verificare le metriche e il rollover descritto nei limiti Workers. Questo campione non prova ogni percorso né la coda massima: controllare separatamente webhook, comandi con filtri/review, consegne e carico limite. La ricerca reale con 200 record e 10 chiamate recensioni ha restituito 10 offerte usando 6,410 ms CPU; la prova prezzi ha verificato 10 giochi. Entrambe sono letture senza messaggi artificiali. Sono passati 61 test TypeScript e 6 Python, typecheck esteso a strumenti/test e build. Le prime prove hanno riprodotto un HTTP400 per `Content-Type: application/json` sulle richieste GET: il client ora imposta questa intestazione soltanto sulle richieste con corpo.
+La prima verifica remota ha mostrato CPU **3,554–8,956 ms** nelle metriche GraphQL e **3–8 ms** nei trace tail, senza errori nel seed osservato. I valori GraphQL erano microsecondi, convertiti dividendo per 1.000. Le verifiche successive prima dell'ottimizzazione hanno rilevato picchi di 18,741 ms nei consumer e 14,381 ms sul trigger, senza errori di risorse. Lo scheduler è stato quindi suddiviso in tre lavori indipendenti (prezzi, giveaway, recupero), con pubblicazione tracciata e pagine giveaway singole. HTTP e Cron ora accodano soltanto tre piccoli messaggi; i lavori funzionano anche se arrivano in ordine diverso. Il costo fisso aggiuntivo è circa 432 operazioni Queue/giorno. Dopo la suddivisione, il ciclo ordinario è terminato senza job pendenti e senza errori di risorse: trigger HTTP 2,283 ms, picco osservato nei lavori 10,499 ms (prima 18,741 ms). Un picco occasionale non equivale a una garanzia che ogni invocazione resti sotto 10 ms; verificare le metriche e il rollover descritto nei limiti Workers. Questo campione non prova ogni percorso né la coda massima: controllare separatamente webhook, comandi con filtri/review, consegne e carico limite. La ricerca reale con 200 record e 10 chiamate recensioni ha restituito 10 offerte usando 6,410 ms CPU; la prova prezzi ha verificato 10 giochi. Entrambe sono letture senza messaggi artificiali. Nella verifica iniziale erano passati 61 test TypeScript e 6 Python, typecheck esteso a strumenti/test e build. Le prime prove hanno riprodotto un HTTP400 per `Content-Type: application/json` sulle richieste GET: il client ora imposta questa intestazione soltanto sulle richieste con corpo.
 
 Controllare CPU/`exceededCpu`, errori API/429, backlog e retry Queue, quota operazioni, righe D1 e timestamp delle scansioni complete. Una Queue vuota non prova una scansione riuscita: verificare anche D1. Se il backlog si avvicina alle 24 ore o i consumi superano il margine, sospendere `SCANS_ENABLED` e ridurre/ottimizzare il lavoro prima di riattivare; non passare automaticamente a Paid. Le pulizie sono limitate per ciclo: update/job completati dopo 7 giorni e consegne finalizzate dopo 90 giorni. Wishlist e preferenze restano persistenti.
 
@@ -144,3 +145,23 @@ Per tornare a Python:
 5. Verificare Cloudflare sospeso e nuovi update ricevuti soltanto dal proprietario scelto. Non eliminare D1, Queue o PostgreSQL.
 
 Provare ogni ripristino prima su una copia locale. Usare Time Travel o backup SQL dopo aver verificato il punto di recupero e le consegne già effettuate: una vecchia outbox senza riconciliazione può reinviare messaggi. Conservare gli identificativi delle consegne confermate durante la procedura.
+
+## Rilascio della wishlist compatta e delle due code
+
+Il codice attivo è ora organizzato secondo [architecture.md](architecture.md). Prima di deployare questa versione: backup D1 nuovo in un percorso privato protetto, restore locale e applicazione verificata di 0004_message_edits.sql; creazione di itad-notifier-interactions se assente; applicazione remota della migrazione additiva; deploy. La migrazione mantiene le righe precedenti come operation=send. Non reimportare il database legacy. Conservare la vecchia Queue, webhook e secrets. Le due code condividono le 10.000 operazioni Free/giorno dell'account: la separazione non raddoppia la quota.
+
+La versione precedente non comprende le nuove edit. Per rollback mantenere un consumer compatibile fino al completamento o sospensione dei nuovi job; tornare direttamente al vecchio codice mentre edit pendono può trasformarle in invii separati. Lo schema additivo può restare; non cancellare colonne o D1 durante il rollback.
+
+Prima del cambiamento, un campione reale per comando ha rilevato /wishlist: 11 reply e 18,45 s fino all'ultima conferma; /start: 55,81 s; /deals: 75,78 s. Sono singoli campioni, non percentili o garanzie. Il confronto successivo va misurato su traffico reale, anche durante una scansione.
+
+Per una query aggregata readonly: `npx tsx scripts/diagnostics/latency.ts 2026-10-08T15:15:00Z`, quindi passare il testo prodotto a `wrangler d1 execute ... --command`. Non usare --file per ottenere righe da SELECT. Per confrontare le recensioni senza notifiche artificiali, POST autenticato /admin/probe con JSON {"compareReviews":true}; i risultati aggregati restano nelle settings probe_deals_1 e probe_deals_2. Mantenere REVIEW_CONCURRENCY=1 finché risultati, errori/429 e CPU remota non consentono 2.
+
+Gli avvisi gratuiti abilitano nuovamente l’anteprima del link ufficiale verificato, come nel broadcast Python. Telegram genera l’immagine quando la pagina la rende disponibile; prefer_large_media è una preferenza, non una garanzia. Guide e pagine wishlist restano compatte. [Opzioni anteprima Telegram](https://core.telegram.org/bots/api#linkpreviewoptions).
+
+## Verifica del rilascio del 9 ottobre 2026
+
+La versione con le due code e migration 0004 è stata pubblicata. Health e webhook corretti; scansioni prezzo/giveaway completate, backlog zero e nessun errore osservato. I riferimenti prezzo e tutte le 13 righe wishlist presenti immediatamente prima del deploy sono rimasti identici; le preferenze sono 2 e i marcatori legacy 10. Il conteggio 16 precedente descrive l'import iniziale, non ripristina giochi rimossi successivamente.
+
+Il confronto readonly ha restituito 10 offerte in entrambe le modalità: recensioni seriali 2964 ms, concorrenza 2 1557 ms; prezzi dieci giochi 1134 ms. Sono singoli campioni di chiamate ITAD, non tempi completi dei comandi. I test controllati verificano lo stesso ordine, massimo due chiamate simultanee e dieci totali. La traccia ha mostrato picco consumer 8 ms e nessun errore; GraphQL dopo deploy: 49 invocazioni riuscite, errori 0, CPU P99 8,714 ms. Quote Queue aggregate dell'account: 1112 operazioni nel giorno osservato, entrambe le code con retention 24 ore. Dopo queste prove l'installazione configura REVIEW_CONCURRENCY=2; il client senza configurazione resta a 1. Campioni limitati non garantiscono ogni carico.
+
+Passati 90 test TypeScript e 6 Python, typecheck/build e audit dei valori privati nei file pubblicabili. La revisione indipendente ha rilevato tre casi corretti con regressioni RED→GREEN: pubblicazione reply dopo update completato, fallback messaggio cancellato, edit simultanee dello stesso target fra code. Il checkout principale contiene ora il progetto attivo; le tre modifiche locali precedenti restano conservate nei percorsi legacy/IDE, senza pubblicazione automatica.
