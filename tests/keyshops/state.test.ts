@@ -11,6 +11,7 @@ const price = {
   url: "https://gg.deals/game/portal/",
   keyCents: 1000,
   retailCents: 3000,
+  regularCents: 6000,
   historicalKeyCents: 100,
   historicalRetailCents: 0,
 };
@@ -31,7 +32,7 @@ test("key baseline is quiet, independent, and advances only on confirmed deliver
     w = new WishlistRepository(t.db),
     d = new DeliveriesRepository(t.db);
   await w.addWishlist("user", null, game, null, 1);
-  await r.map(game.id, game.title, 620, 1);
+  await r.map(game.id, game.title, 620, 1, 2026);
   await r.observe(game.id, price, 3000, 1, false, ["channel"]);
   assert.equal((await d.pendingDeliveries(1)).length, 1); // new general bargain; wishlist quiet
   await r.observe(game.id, { ...price, keyCents: 950 }, 3000, 2, false, []);
@@ -82,7 +83,7 @@ test("quiet discovery, real comparisons, rebound and changed preferences invalid
     w = new WishlistRepository(t.db),
     d = new DeliveriesRepository(t.db);
   await w.addWishlist("u", null, game, null, 1);
-  await r.map(game.id, game.title, 620, 1);
+  await r.map(game.id, game.title, 620, 1, 2026);
   await r.observe(game.id, price, 3000, 1, true, ["channel"]);
   assert.deepEqual(await d.pendingDeliveries(1), []);
   await r.observe(game.id, { ...price, keyCents: 800 }, 3000, 2, false, [
@@ -113,7 +114,7 @@ test("new general bargain stays eligible through a changed price before its firs
   const t = testDatabase(),
     r = new KeysRepository(t.db),
     d = new DeliveriesRepository(t.db);
-  await r.map(game.id, game.title, 620, 1);
+  await r.map(game.id, game.title, 620, 1, 2026);
   await r.observe(game.id, { ...price, keyCents: 1500 }, 3000, 1, true, [
     "channel",
   ]);
@@ -138,7 +139,7 @@ test("an old processing key delivery cannot advance a re-added wishlist generati
     w = new WishlistRepository(t.db),
     d = new DeliveriesRepository(t.db);
   await w.addWishlist("u", null, game, null, 1);
-  await r.map(game.id, game.title, 620, 1);
+  await r.map(game.id, game.title, 620, 1, 2026);
   await r.observe(game.id, price, 3000, 1, true, []);
   await r.observe(game.id, { ...price, keyCents: 800 }, 3000, 2, false, []);
   const old = (await d.claimDelivery((await d.pendingDeliveries(2))[0], 2))!;
@@ -184,11 +185,11 @@ test("retired mapping cannot complete into a new app baseline", async () => {
     w = new WishlistRepository(t.db),
     d = new DeliveriesRepository(t.db);
   await w.addWishlist("u", null, game, null, 1);
-  await r.map(game.id, game.title, 620, 1);
+  await r.map(game.id, game.title, 620, 1, 2026);
   await r.observe(game.id, price, 3000, 1, true, []);
   await r.observe(game.id, { ...price, keyCents: 800 }, 3000, 2, false, []);
   const old = (await d.claimDelivery((await d.pendingDeliveries(2))[0], 2))!;
-  await r.map(game.id, game.title, 621, 3);
+  await r.map(game.id, game.title, 621, 3, 2026);
   await r.observe(
     game.id,
     { ...price, appId: 621, keyCents: 700 },
@@ -210,11 +211,11 @@ test("same-price delivery after mapping change keeps the new app identity", asyn
   const t = testDatabase(),
     r = new KeysRepository(t.db),
     d = new DeliveriesRepository(t.db);
-  await r.map(game.id, game.title, 620, 1);
+  await r.map(game.id, game.title, 620, 1, 2026);
   await r.observe(game.id, { ...price, keyCents: 800 }, 3000, 1, false, [
     "channel",
   ]);
-  await r.map(game.id, game.title, 621, 2);
+  await r.map(game.id, game.title, 621, 2, 2026);
   await r.observe(
     game.id,
     { ...price, appId: 621, keyCents: 800 },

@@ -52,6 +52,7 @@ export async function enqueueTick(
         "giveaways",
         "recover",
         ...(keysEnabled(context) ? ["keys" as const] : []),
+        ...(context.env.NEWS_ENABLED === "true" && enabled(context) ? ["news" as const] : []),
       ] as const
     ).map((part) => ({
       kind: "tick",

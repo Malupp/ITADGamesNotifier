@@ -10,18 +10,21 @@ export interface Env {
   GGDEALS_API_KEY?: string;
   KEYSHOPS_ENABLED?: string;
   SCANS_ENABLED?: string;
+  NEWS_ENABLED?: string;
   REVIEW_CONCURRENCY?: string;
 }
 
 export type QueueJob =
   | {
       kind: "tick";
-      part: "prices" | "giveaways" | "recover" | "keys";
+      part: "prices" | "giveaways" | "recover" | "keys" | "news";
       scheduledAt: number;
       initialize: boolean;
     }
   | { kind: "probe"; scenario: "deals" | "prices"; reviewConcurrency?: 1 | 2 }
   | { kind: "scan"; id: string }
   | { kind: "keyscan"; id: string }
+  | { kind: "newsfeed"; id: string }
+  | { kind: "newsdelivery"; id: string }
   | { kind: "delivery"; id: string }
   | { kind: "update"; id: number };

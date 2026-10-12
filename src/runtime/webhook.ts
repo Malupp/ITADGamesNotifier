@@ -3,6 +3,7 @@ import type { TelegramUpdate } from "../domain/models.js";
 import { enabled } from "../application/retries.js";
 import { enqueueTick, sendJobs } from "./queues.js";
 import { keysEnabled } from "../application/keys.js";
+import { newsEnabled } from "../application/news.js";
 export async function handleRequest(
   request: Request,
   context: ApplicationContext,
@@ -26,6 +27,8 @@ export async function handleRequest(
         giveawaysSeeded:
           (await context.settings.getSetting("giveaways_seeded")) === "true",
         keysEnabled: keysEnabled(context),
+        newsEnabled: newsEnabled(context),
+        newsActiveGroups: (await context.news.activeGroups()).length,
         keysSeeded:
           (await context.settings.getSetting("keys_seeded")) === "true",
         lastKeyScan: await context.settings.getSetting("last_key_scan"),

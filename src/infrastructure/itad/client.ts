@@ -28,6 +28,16 @@ const boundedLimit = (limit: number, maximum: number) =>
 
 function gameFrom(value: unknown): Game | null {
   const data = record(value);
+  const releaseDate = data.releaseDate;
+  const releaseAt =
+    typeof releaseDate === "string" && /^\d{4}-\d{2}-\d{2}$/.test(releaseDate)
+      ? Date.parse(releaseDate)
+      : NaN;
+  const releaseYear =
+    Number.isFinite(releaseAt) &&
+    new Date(releaseAt).toISOString().slice(0, 10) === releaseDate
+      ? new Date(releaseAt).getUTCFullYear()
+      : null;
   return uuid(data.id) &&
     data.type === "game" &&
     typeof data.title === "string" &&
@@ -38,6 +48,7 @@ function gameFrom(value: unknown): Game | null {
         slug: data.slug,
         title: data.title,
         type: data.type,
+        ...("releaseDate" in data ? { releaseYear } : {}),
         ...("appid" in data
           ? {
               steamAppId:

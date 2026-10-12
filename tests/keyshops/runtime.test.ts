@@ -13,6 +13,7 @@ const game = {
   slug: "portal",
   type: "game",
   steamAppId: 620,
+  releaseYear: 2026,
 };
 const p = {
   appId: 620,
@@ -20,6 +21,7 @@ const p = {
   url: "https://gg.deals/game/portal/",
   keyCents: 1000,
   retailCents: 3000,
+  regularCents: 6000,
   historicalKeyCents: 100,
   historicalRetailCents: 0,
 };
@@ -51,6 +53,43 @@ function setup() {
   c.gg.getPrices = async () => new Map([[620, p]]);
   return { t, c, published };
 }
+test("scheduled GG prices without a list field persist the official ITAD list", async () => {
+  const { t, c, published } = setup();
+  try {
+    const { regularCents: _ignored, ...raw } = p;
+    c.gg.getPrices = async () => new Map([[620, raw]]);
+    c.itad.getPrices = async () =>
+      new Map([
+        [
+          game.id,
+          [
+            {
+              gameId: game.id,
+              shop: "Steam",
+              shopId: 61,
+              url: "https://store.steampowered.com/app/620/",
+              priceCents: 3000,
+              regularCents: 6000,
+              cut: 50,
+              currency: "EUR",
+              expiry: null,
+            },
+          ],
+        ],
+      ]);
+    await scheduleKeys(c, 60000);
+    while (published.length) {
+      const job = published.shift();
+      if (job.kind === "keyscan") await processKeyScan(job.id, c, 60000);
+    }
+    assert.equal(
+      (await c.keys.prices([game.id])).get(game.id)?.regularCents,
+      6000,
+    );
+  } finally {
+    t.close();
+  }
+});
 test("durable discovery/map/price chain recovers lost publication and seeds quietly", async () => {
   const { t, c, published } = setup();
   await c.wishlist.addWishlist("u", null, game, null, 1);
@@ -67,6 +106,7 @@ test("durable discovery/map/price chain recovers lost publication and seeds quie
   next = published.shift();
   await processKeyScan(next.id, c, 60000);
   assert.equal(await c.settings.getSetting("keys_seeded"), "true");
+  assert.equal((await c.keys.mapping(game.id))?.releaseYear, 2026);
   assert.deepEqual(await c.deliveries.pendingDeliveries(60000), []);
   assert.equal((await c.keys.prices(["game"])).get("game")!.keyCents, 1000);
   t.close();

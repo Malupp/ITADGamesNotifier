@@ -1,5 +1,19 @@
 # Gestione del notifier su Cloudflare Free
 
+## Rilascio delle news RSS
+
+La migrazione additiva `0007_news.sql` e la configurazione `NEWS_ENABLED=false` preparano il servizio senza avviare invii. Il ramo comprende anche `0006_key_release_year.sql`, che restringe gli avvisi generali key al 2026 e 2027: considerare entrambe le modifiche nel bundle di rilascio.
+
+Prima del rilascio remoto creare un nuovo backup D1 privato e provarne il ripristino locale come descritto sotto. Eseguire suite, typecheck, build dry run, migrazioni locali e `npx tsx scripts/diagnostics/news-feeds.ts`. Lo script legge soltanto feed pubblici, senza Telegram o dati dei gruppi.
+
+Applicare le migrazioni remote e distribuire il Worker mantenendo **NEWS_ENABLED=false**. Nessun gruppo viene abilitato automaticamente. In un gruppo di prova concordato, promuovere il bot ad amministratore e usare `/news on`; impostare quindi `NEWS_ENABLED=true` per il collaudo del servizio. La prima lettura delle fonti è silenziosa; i nuovi articoli dei cicli successivi verificano attribuzione, aree, dedup e limite. Gli altri gruppi restano spenti. Solo dopo il collaudo abilitare i gruppi desiderati con `/news on`.
+
+Per sospendere soltanto le news, distribuire `NEWS_ENABLED=false`; per sospendere tutti gli avvisi automatici usare `SCANS_ENABLED=false`. Per rollback del codice conservare le tabelle additive e tornare alla versione precedente: non cancellare tabelle o ripristinare il backup sopra dati nuovi senza una decisione esplicita. Per spegnere un singolo gruppo usare `/news off`; i suoi lavori pendenti diventano obsoleti.
+
+Il cap iniziale è dieci gruppi. A pieno uso: otto feed × 48 cicli = 384 job feed/giorno, fino a 720 tentativi news/giorno nei dieci gruppi, più 48 tick news. Con tre operazioni Queue per messaggio fanno circa **3456 operazioni/giorno aggiuntive**, prima dei retry e dei lavori già esistenti. È una stima massima ordinaria: errori, backlog, richieste interattive e burst vanno misurati sul dashboard. Verificare il margine delle quote Workers, D1 e Queues prima dell’attivazione o dell’aumento della capacità; il parser sui feed reali va misurato nel Worker, i test Node non dimostrano il margine CPU remoto.
+
+`/admin/status` espone `newsEnabled` e il conteggio aggregato `newsActiveGroups`, protetti dal secret webhook. Per SQL diagnostico usare conteggi aggregati di `news_jobs`, `news_deliveries` e `news_send_attempts`, senza esportare chat ID nei log. Una fonte indisponibile viene ritentata al massimo cinque volte per ciclo e non blocca le altre. I job e lo storico terminati vengono eliminati in lotti dopo sette giorni; i tentativi dopo 24 ore.
+
 ## Stato verificato l'8 ottobre 2026
 
 Il Worker risponde su [itad-games-notifier.luppinomanuel.workers.dev](https://itad-games-notifier.luppinomanuel.workers.dev/health). L'account Free è stato confermato dall'utente. `SCANS_ENABLED=true`: scansioni di produzione attive e webhook Telegram registrato senza cancellare gli aggiornamenti pendenti. Telegram ha inizialmente restituito un errore DNS temporaneo, superato con un IP verificato. La registrazione senza IP fisso è poi riuscita: il webhook usa di nuovo la risoluzione DNS ordinaria. Il controllo dopo l'attivazione ha confermato zero update pendenti, nessun errore webhook, aggiornamenti salvati e processati in D1, prima scansione ordinaria completata e nessuna raffica di avvisi.
@@ -179,3 +193,13 @@ Il pool giornaliero contiene fino a 130 giochi e si unisce ai massimo 200 titoli
 Rollback funzionale: mantenere il codice compatibile con il nuovo discriminatore della outbox e impostare `KEYSHOPS_ENABLED=false`. Le key in attesa vengono scartate senza essere interpretate come prezzi ITAD; le vecchie funzionalità continuano. Evitare il ritorno diretto al vecchio consumer se esistono consegne key pendenti o in lavorazione. Conservare schema, secret e backup; per riattivare, ripristinare il flag. La disabilitazione non cancella riferimenti già confermati.
 
 Verificato il 9 ottobre 2026 per il rilascio keyshop: versione Worker `573fd624-ba66-478b-84bb-49d0e2a39793`, migrazione 0005 applicata, cron ancora ogni 30 minuti e menu Telegram con 15 comandi inclusa `/keys`. Il backup precedente è stato ripristinato in SQLite e tutte le righe/colonne originarie risultano identiche dopo la migrazione. Produzione: 10 wishlist e 2 preferenze conservate; primo seed completato con 116 mapping verificati, 110 app ID Steam e 110 prezzi in cache, 36 affari eleggibili e **zero avvisi key**. I limitatori temporanei delle fonti sono stati ritentati; nel campione di esecuzioni Worker non sono emerse eccezioni o esiti di superamento CPU. Webhook corretto, senza update pendenti o errori. 128 test TypeScript, typecheck, build dry-run, 6 test Python e CI PR riusciti. Nessun messaggio Telegram artificiale inviato per la verifica.
+
+## Rilascio affari speciali e news — 12 ottobre 2026
+
+Pubblicato il Worker `801367ce-a179-4e23-89c5-3d46607b14d3`, precedente `573fd624-ba66-478b-84bb-49d0e2a39793`. Migrazioni additive 0006–0008 applicate. Backup completo nella destinazione privata esplicitamente autorizzata, ripristino SQLite verificato: 17 tabelle e5660 righe originarie identiche dopo le migrazioni. Backup e link temporanei non vanno inclusi nei file pubblicabili.
+
+Il filtro degli avvisi key generali è ora2026/2027, listino ufficiale oltre30EUR, key almeno50% sotto listino e inferiore al miglior prezzo autorizzato corrente. La coda viene ricontrollata prima dell’invio; wishlist personale separata. 163 test, typecheck e pubblicazione riusciti.
+
+Configurazione globale NEWS_ENABLED=true, SCANS_ENABLED=true, KEYSHOPS_ENABLED=true e REVIEW_CONCURRENCY=1; nessun gruppo news abilitato automaticamente. Health e admin/status200, newsEnabled=true e newsActiveGroups=0, webhook corretto e nessun update Telegram pendente. Menu con16 comandi inclusa news; il bot è amministratore della destinazione di gruppo configurata. Per attivare le news, un amministratore usa /news on nel gruppo. La prima lettura delle fonti è silenziosa. Il primo traffico RSS in un gruppo attivato resta il collaudo delle quote reali; questa verifica non ha inviato messaggi news artificiali né abilitato gruppi.
+
+Primo controllo online completato: 116 metadati di uscita ricaricati, 31 listini oltre 30€ acquisiti, nessun job key attivo e nessun affare generale pendente. Il campione monitorato contiene un gioco con anno 2026/2027: non è una copertura completa delle nuove uscite. Nessun avviso generale non idoneo è rimasto in coda.

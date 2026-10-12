@@ -2,6 +2,7 @@ import type { ApplicationContext } from "./context.js";
 import { ApiError } from "../infrastructure/http.js";
 import { enabled } from "./retries.js";
 import { scheduleKeys, publishKeys, keysEnabled } from "./keys.js";
+import { scheduleNews } from "./news.js";
 import {
   publishJobs,
   publishScans,
@@ -11,10 +12,11 @@ export async function schedule(
   context: ApplicationContext,
   now: number,
   initialize = false,
-  part: "all" | "prices" | "giveaways" | "recover" | "keys" = "all",
+  part: "all" | "prices" | "giveaways" | "recover" | "keys" | "news" = "all",
 ): Promise<void> {
   if (!enabled(context) && !initialize) return;
   const scans = context.scans;
+  if (part === "all" || part === "news") await scheduleNews(context, now);
   if (part === "all" || part === "keys")
     await scheduleKeys(context, now, initialize);
   if (part === "all" || part === "prices") {

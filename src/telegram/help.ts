@@ -10,8 +10,13 @@ Controllo IsThereAnyDeal e confermo la promozione sul negozio ufficiale: al mome
 Apri il link e riscatta il gioco prima della scadenza: il bot non lo riscatta per te. Gli avvisi gratuiti arrivano nelle chat configurate.
 
 🔑 <b>Key a prezzi bassissimi</b>
-/keys — affari della selezione monitorata: massimo 10€ e almeno il 50% sotto il miglior prezzo nei negozi autorizzati. Arrivano anche avvisi nelle chat configurate; per lo stesso gioco attendo almeno un altro ribasso del 10%.
+/keys — affari della selezione monitorata: listino superiore a 30€ e key almeno al 50% sotto listino, più economica dell’offerta autorizzata corrente. Gli avvisi automatici riguardano soltanto giochi del 2026/2027 nelle chat configurate; per lo stesso gioco attendo almeno un altro ribasso del 10%.
 I prezzi key compaiono anche in /cerca, /confronta, /wishlist e nelle offerte senza filtro negozio, quando disponibili. Fonte: <a href="https://gg.deals/">GG.deals</a>, dati aggiornati circa ogni ora; controllo ogni 30 minuti. Il feed gratuito mostra il minimo aggregato, senza indicare il singolo venditore: apri GG.deals e verifica commissioni, negozio e regione di attivazione prima di acquistare.
+
+📰 <b>News italiane · nei gruppi</b>
+/news — mostra lo stato delle news del gruppo.
+/news on o /news off — un amministratore attiva o disattiva tutte le news: videogiochi, film, anime e manga. Anche il bot deve essere amministratore.
+Massimo 3 singole notizie all’ora per gruppo, con titolo, fonte e link. La prima lettura delle fonti è silenziosa; non recupero le pubblicazioni precedenti all’attivazione.
 
 📋 <b>La tua wishlist · in chat privata</b>
 /add &lt;titolo&gt; — cerca un gioco, poi premi il pulsante per aggiungerlo.

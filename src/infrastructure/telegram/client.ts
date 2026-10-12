@@ -1,6 +1,7 @@
-import { request } from "../http.js";
+import { request, ApiError } from "../http.js";
 /** API contract: https://core.telegram.org/bots/api */
 export class TelegramClient {
+  private botId?: number;
   constructor(
     private token: string,
     private fetcher: typeof fetch = fetch,
@@ -8,8 +9,8 @@ export class TelegramClient {
   private async call(
     method: string,
     body: Record<string, unknown>,
-  ): Promise<void> {
-    await request(
+  ): Promise<any> {
+    const response = await request(
       this.fetcher,
       `https://api.telegram.org/bot${this.token}/${method}`,
       {
@@ -19,6 +20,33 @@ export class TelegramClient {
       },
       true,
     );
+    return (response as any)?.result;
+  }
+  async getGroupAccess(chatId: string, userId?: string) {
+    const chat = await this.call('getChat', {chat_id:chatId});
+    if (String(chat?.id)!==chatId || !['private','channel','group','supergroup'].includes(chat?.type)) throw new ApiError(502);
+    const isGroup = chat.type==='group' || chat.type==='supergroup';
+    if (!isGroup) return {isGroup:false,botCanSend:false,userIsAdmin:false,chatType:null};
+    if (this.botId===undefined) {
+      const bot = await this.call('getMe', {});
+      if (!Number.isSafeInteger(bot?.id) || bot.id<=0 || bot.is_bot!==true) throw new ApiError(502);
+      this.botId=bot.id;
+    }
+    const member = async (id:number) => {
+      const result = await this.call('getChatMember', {chat_id:chatId,user_id:id});
+      if (result?.user?.id!==id || !['creator','administrator','member','restricted','left','kicked'].includes(result?.status)) throw new ApiError(502);
+      return result;
+    };
+    const bot = await member(this.botId!);
+    // Telegram guarantees checking other members only when the bot is an administrator.
+    const botCanSend=bot.status==='administrator' || bot.status==='creator';
+    let userIsAdmin=false;
+    if (botCanSend && userId!==undefined) {
+      const id=Number(userId); if(!Number.isSafeInteger(id)||id<=0) throw new ApiError(502);
+      const user=await member(id);
+      userIsAdmin=user.user.is_bot!==true && (user.status==='administrator'||user.status==='creator');
+    }
+    return {isGroup:true,botCanSend,userIsAdmin,chatType:chat.type as 'group'|'supergroup'};
   }
   async sendMessage(
     chatId: string,

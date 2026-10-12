@@ -33,7 +33,7 @@ export async function processUpdate(
     if (user) await context.deliveries.unblockChat(String(user.id));
     await measure(
       "update",
-      () => handleUpdate(context, claim.update),
+      () => handleUpdate(context, claim.update, claim.createdAt),
       context.recordTiming,
     );
     await context.updates.completeUpdate(id, claim.token);
@@ -49,8 +49,9 @@ export async function processUpdate(
 export async function handleUpdate(
   context: ApplicationContext,
   update: TelegramUpdate,
+  receivedAt?: number,
 ): Promise<void> {
-  const session = createSession(context, update);
+  const session = createSession(context, update, receivedAt);
   if (!session) return;
   if (update.callback_query) await handleCallback(session);
   else await handleCommand(session);

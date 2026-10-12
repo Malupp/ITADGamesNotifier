@@ -1,4 +1,5 @@
 import type { BotSession } from "./session.js";
+import { handleNews } from "./news.js";
 import type { Preferences } from "../domain/models.js";
 import { toCents } from "../domain/pricing.js";
 import { HELP } from "./help.js";
@@ -40,6 +41,10 @@ export async function handleCommand(session: BotSession): Promise<void> {
   const command = match[1].toLowerCase(),
     args = match[2]?.trim().split(/\s+/) ?? [];
   if (!COMMANDS.has(command)) return;
+  if (command === "news") {
+    await handleNews(session, args);
+    return;
+  }
   if (PRIVATE_COMMANDS.has(command) && !isPrivate) {
     await privateOnly();
     return;
@@ -63,7 +68,7 @@ export async function handleCommand(session: BotSession): Promise<void> {
     }
     const bargains = await context.keys.bargains(context.now());
     await showList(
-      "🔑 <b>Affari key · Italia, EUR</b>\nMassimo 10€ e almeno 50% sotto il miglior prezzo autorizzato. Selezione monitorata, non l’intero catalogo.",
+      "🔑 <b>Affari key · Italia, EUR</b>\nListino superiore a 30€ e key almeno al 50% sotto listino, più conveniente del prezzo autorizzato corrente. Selezione monitorata, non l’intero catalogo.",
       bargains.length
         ? bargains.map(
             (p) =>

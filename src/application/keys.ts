@@ -1,6 +1,11 @@
 import type { ApplicationContext } from "./context.js";
 import type { Delivery, Game, PriceQuote } from "../domain/models.js";
-import { bestRetail, isKeyBargain, keyDrop } from "../domain/key-pricing.js";
+import {
+  bestRetail,
+  bestRegular,
+  isSpecialKeyDeal,
+  keyDrop,
+} from "../domain/key-pricing.js";
 import { keyText } from "../infrastructure/d1/keys.js";
 import { escapeHtml } from "../telegram/formatters.js";
 import { ApiError } from "../infrastructure/http.js";
@@ -107,7 +112,12 @@ export async function processKeyScan(
     } else if (task.phase === "map") {
       const gameId = task.ids[task.offset],
         old = await c.keys.mapping(gameId);
-      if (!old || old.at === 0 || now - old.at >= 7 * 86400000) {
+      if (
+        !old ||
+        old.at === 0 ||
+        old.releaseCheckedAt === 0 ||
+        now - old.at >= 7 * 86400000
+      ) {
         const info = await c.itad.getGameInfo(gameId);
         if (info && info.id !== gameId) throw new ApiError(502);
         await c.keys.map(
@@ -115,13 +125,14 @@ export async function processKeyScan(
           info?.title ?? gameId,
           info?.steamAppId ?? null,
           now,
+          info?.releaseYear ?? null,
         );
       }
       // Skip all fresh mappings in one bounded database read on the next run.
       let offset = task.offset + 1;
       const fresh = (
         await c.env.DB.prepare(
-          "SELECT game_id FROM key_games WHERE mapped_at>0 AND mapped_at>?",
+          "SELECT game_id FROM key_games WHERE mapped_at>0 AND mapped_at>? AND release_checked_at>0",
         )
           .bind(now - 7 * 86400000)
           .all<{ game_id: string }>()
@@ -152,7 +163,12 @@ export async function processKeyScan(
           const p = prices.get(m.steam_app_id) ?? null;
           return {
             id: m.game_id,
-            price: p,
+            price: p
+              ? {
+                  ...p,
+                  regularCents: bestRegular(official.get(m.game_id) ?? []),
+                }
+              : null,
             retail: bestRetail(
               p?.retailCents ?? null,
               ...(official.get(m.game_id) ?? []).map((q) => q.priceCents),
@@ -191,15 +207,23 @@ export async function interactiveKeys(
     if (mapUnknown && games.length === 1) {
       const g = games[0],
         old = await c.keys.mapping(g.id);
-      if (!old || old.at === 0 || c.now() - old.at >= 7 * 86400000) {
+      if (
+        !old ||
+        old.at === 0 ||
+        old.releaseCheckedAt === 0 ||
+        c.now() - old.at >= 7 * 86400000
+      ) {
         const info =
-          g.steamAppId !== undefined ? g : await c.itad.getGameInfo(g.id);
+          g.steamAppId !== undefined && g.releaseYear !== undefined
+            ? g
+            : await c.itad.getGameInfo(g.id);
         if (info && info.id !== g.id) throw new ApiError(502);
         await c.keys.map(
           g.id,
           info?.title ?? g.title,
           info?.steamAppId ?? null,
           c.now(),
+          info?.releaseYear ?? null,
         );
       }
     }
@@ -228,7 +252,12 @@ export async function interactiveKeys(
       await c.keys.observeMany(
         stale.map((r) => ({
           id: r.game_id,
-          price: prices.get(r.steam_app_id) ?? null,
+          price: prices.has(r.steam_app_id)
+            ? {
+                ...prices.get(r.steam_app_id)!,
+                regularCents: bestRegular(retail.get(r.game_id) ?? []),
+              }
+            : null,
           retail: bestRetail(
             prices.get(r.steam_app_id)?.retailCents ?? null,
             ...(retail.get(r.game_id) ?? []).map((q) => q.priceCents),
@@ -256,7 +285,12 @@ export async function revalidateKeyDelivery(
 ): Promise<string | null> {
   if (!keysEnabled(c) || !d.game_id) return null;
   let mapping = await c.keys.mapping(d.game_id);
-  if (mapping && now - mapping.at >= 7 * 86400000) {
+  if (
+    mapping &&
+    (mapping.at === 0 ||
+      mapping.releaseCheckedAt === 0 ||
+      now - mapping.at >= 7 * 86400000)
+  ) {
     const info = await c.itad.getGameInfo(d.game_id);
     if (info && info.id !== d.game_id) throw new ApiError(502);
     const changed = (info?.steamAppId ?? null) !== mapping.appId;
@@ -265,11 +299,18 @@ export async function revalidateKeyDelivery(
       info?.title ?? d.game_id,
       info?.steamAppId ?? null,
       now,
+      info?.releaseYear ?? null,
     );
     if (changed) return null;
     mapping = await c.keys.mapping(d.game_id);
   }
   if (!mapping?.appId || mapping.appId !== d.key_app_id) return null;
+  if (
+    d.source === "keydeal" &&
+    mapping.releaseYear !== 2026 &&
+    mapping.releaseYear !== 2027
+  )
+    return null;
   const prices = await ggPrices(c, [mapping.appId], now),
     p = prices.get(mapping.appId) ?? null;
   const official = await c.itad.getPrices([d.game_id]);
@@ -277,7 +318,16 @@ export async function revalidateKeyDelivery(
     p?.retailCents ?? null,
     ...(official.get(d.game_id) ?? []).map((q) => q.priceCents),
   );
-  await c.keys.observe(d.game_id, p, retail, now, true, targets(c), true);
+  const regular = bestRegular(official.get(d.game_id) ?? []);
+  await c.keys.observe(
+    d.game_id,
+    p ? { ...p, regularCents: regular } : null,
+    retail,
+    now,
+    true,
+    targets(c),
+    true,
+  );
   if (
     !p ||
     p.keyCents !== d.price_cents ||
@@ -312,7 +362,7 @@ export async function revalidateKeyDelivery(
     p.title = item.title;
   } else if (
     !targets(c).includes(d.chat_id) ||
-    !isKeyBargain(p.keyCents, retail) ||
+    !isSpecialKeyDeal(p.keyCents, regular, retail) ||
     !(
       keyDrop(state.notified ?? state.baseline, p.keyCents, 10) ||
       (state.notified === null &&
@@ -320,5 +370,5 @@ export async function revalidateKeyDelivery(
     )
   )
     return null;
-  return `🔔 <b>${mode === "wishlist" ? "Ribasso key wishlist" : "Affare key"}</b>\n🎮 <b>${escapeHtml(p.title)}</b>\n${keyText({ ...p, retailCents: retail }, now)}`;
+  return `🔔 <b>${mode === "wishlist" ? "Ribasso key wishlist" : "Affare key"}</b>\n🎮 <b>${escapeHtml(p.title)}</b>\n${keyText({ ...p, retailCents: retail }, now)}${mode === "general" ? `\nListino autorizzato: ${(regular! / 100).toFixed(2)}€ · almeno 50% sotto listino` : ""}`;
 }

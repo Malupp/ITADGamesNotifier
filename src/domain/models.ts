@@ -1,5 +1,6 @@
 export interface Game {
   steamAppId?: number | null;
+  releaseYear?: number | null;
   id: string;
   slug: string;
   title: string;
@@ -52,6 +53,7 @@ export interface TelegramUpdate {
   message?: {
     message_id: number;
     text?: string;
+    sender_chat?: { id: number };
     chat: { id: number; type?: string };
     from?: { id: number; username?: string; first_name?: string };
   };

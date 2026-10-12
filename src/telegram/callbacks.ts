@@ -1,4 +1,5 @@
 import type { BotSession } from "./session.js";
+import { handleNewsCallback } from "./news.js";
 import type { PriceQuote } from "../domain/models.js";
 import { ApiError } from "../infrastructure/http.js";
 import { money } from "./formatters.js";
@@ -27,6 +28,10 @@ export async function handleCallback(session: BotSession): Promise<void> {
     wishlistPage,
   } = session;
   if (!callback) return;
+  if (callback.data?.startsWith("news|")) {
+    await handleNewsCallback(session);
+    return;
+  }
   // Expired callback acknowledgements never prevent an otherwise valid operation.
   const acknowledge = async (text?: string) => {
     try { await context.telegram.answerCallback(callback.id, text); }

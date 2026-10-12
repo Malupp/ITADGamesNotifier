@@ -17,6 +17,7 @@ import {
 export function createSession(
   context: ApplicationContext,
   update: TelegramUpdate,
+  receivedAt = context.now(),
 ) {
   const callback = update.callback_query,
     message = update.message;
@@ -163,6 +164,7 @@ export function createSession(
 
   return {
     context,
+    receivedAt,
     update,
     callback,
     message,

@@ -14,6 +14,7 @@ src/
     ├── itad/client.ts       ricerca, prezzi, giveaway e recensioni
     ├── stores/verification.ts conferma ufficiale Epic/Steam
     ├── telegram/client.ts   API Telegram
+    ├── news/                registro fonti italiane e normalizzazione RSS
     └── d1/                  repository specializzati
 migrations/                  migrazioni SQL additive ordinate
 scripts/migration/           export e import privati del vecchio stato
@@ -62,6 +63,8 @@ La baseline prezzo cambia soltanto dopo un avviso consegnato. Il 10% riguarda l'
 | Cambiare paginazione e aspetto wishlist | telegram/wishlist.ts, callbacks.ts |
 | Cambiare una regola di ribasso | domain/pricing.ts e relativi test |
 | Aggiungere una fonte verificata | infrastructure/stores/verification.ts |
+| Aggiungere o filtrare una fonte RSS | infrastructure/news/sources.ts, client.ts |
+| Cambiare toggle o limite delle news | telegram/news.ts, application/news.ts, infrastructure/d1/news.ts |
 | Gestire retry e conferma delle notifiche | application/delivery.ts |
 | Modificare periodicità e divisione scansioni | application/scheduler.ts, scan-job.ts, wrangler.jsonc |
 | Modificare SQL o stato persistente | infrastructure/d1/ e nuova migration |
@@ -87,3 +90,13 @@ Il prezzo autorizzato di confronto è il minimo corrente fra ITAD e GG retail: u
 La outbox distingue `itad`, `keyshop` e `keydeal`, pur mantenendo il kind `price` già esistente. Le key conservano anche la generazione dell’inserimento wishlist: una vecchia consegna non può modificare il riferimento dopo rimozione e riaggiunta. La conferma aggiorna soltanto lo stato della fonte corrispondente. Prima di ogni invio si rileggono prezzi e criteri correnti, wishlist e preferenze; uno sconto rimbalzato viene scartato e un errore esterno viene ritentato.
 
 `/keys` e gli altri risultati con key usano la paginazione esistente e scadono entro un’ora dalla più vecchia osservazione mostrata. Non viene inventato il nome del venditore né una percentuale di sconto sul listino delle key: il feed restituisce prezzi minimi, non questi dettagli. Gli avvisi gratuiti mantengono la verifica ufficiale e le anteprime.
+
+## Pipeline news RSS
+
+Il tick `news` crea otto job persistiti, uno per feed e ciclo di 30 minuti, e usa la Queue background esistente. `news-jobs.ts` gestisce lease e marcatori di pubblicazione recuperabili; la prima prova di tutte le fonti conclude la selezione del ciclo anche se una fonte è guasta. Gli articoli delle fonti non ancora inizializzate restano silenziosi. Il client XML applica timeout di 10 secondi, massimo 512 KiB, rifiuto di DTD/entità dichiarate, validatori HTTP e massimo 50 elementi per feed.
+
+La migrazione 0007 aggiunge tabelle separate per gruppi, feed, articoli, lavori, consegne e tentativi. `domain/news.ts` alterna aree e testate usando cursori del gruppo. Ogni consegna conserva generazione e identità testata/URL: off e nuova attivazione invalidano i vecchi lavori. Una revisione separata avanza a ogni comando accettato, anche «off» ripetuto, per invalidare i pulsanti superati senza cancellare notizie pendenti quando si ripete «on». L’ordinamento usa update ID e orario di ricezione persistito: dopo oltre sette giorni ammette un nuovo ID inferiore, mentre gli update vecchi o ricevuti prima dell’ultima modifica non possono cambiare lo stato. Un’azione ricevuta da oltre 24 ore è scaduta. Gli articoli conservano anche GUID e ciclo di origine; un ciclo ancora incompleto non può fornire candidati alla selezione di un altro ciclo.
+
+`application/news.ts` controlla gruppo e permessi Telegram prima di ogni invio, quindi prenota il tentativo con un unico `INSERT ... SELECT` condizionale. La query ricontrolla stato, generazione, lease, data e conteggio della finestra mobile; al massimo tre tentativi per gruppo possono essere prenotati, anche con consumer concorrenti. Un 429 consuma il tentativo e rispetta il ritardo, conservando l’identità della consegna. Dopo un crash nella conferma D1 è possibile un duplicato, sempre entro il budget dei tentativi. Nessun messaggio viene inviato nelle chat private o nei canali.
+
+Ogni gruppo ha al massimo tre consegne pendenti. La selezione è limitata a tre candidati per testata/area e dieci gruppi, con al massimo tre query per gruppo, evitando che fonti prolifiche escludano altre aree e mantenendo il lavoro sotto il limite di query D1 per invocazione. Pruning e pubblicazione sono limitati a piccoli lotti. Il flag globale inizialmente spento preserva lo stato per l’attivazione controllata.

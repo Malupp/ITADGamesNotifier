@@ -16,6 +16,7 @@ const key = {
   url: "https://gg.deals/game/portal/?ref=source",
   keyCents: 400,
   retailCents: 2000,
+  regularCents: 6000,
   historicalKeyCents: 200,
   historicalRetailCents: 0,
 };

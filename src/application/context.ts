@@ -13,6 +13,9 @@ import { ViewsRepository } from "../infrastructure/d1/views.js";
 import { KeysRepository } from "../infrastructure/d1/keys.js";
 import { KeyScans } from "../infrastructure/d1/key-scans.js";
 import { GgClient } from "../infrastructure/gg/client.js";
+import { NewsRepository } from "../infrastructure/d1/news.js";
+import { NewsJobs } from "../infrastructure/d1/news-jobs.js";
+import { NewsFeedClient } from "../infrastructure/news/client.js";
 
 export function createContext(
   env: Env,
@@ -48,6 +51,9 @@ export function createContext(
     scans: new Scans(env.DB),
     keys: new KeysRepository(env.DB),
     keyScans: new KeyScans(env.DB),
+    news: new NewsRepository(env.DB),
+    newsJobs: new NewsJobs(env.DB),
+    newsFeeds: new NewsFeedClient(fetcher),
     gg: new GgClient(env.GGDEALS_API_KEY ?? "", fetcher),
     itad: new ItadClient(env.ITAD_API_KEY, fetcher, {
       reviewConcurrency: env.REVIEW_CONCURRENCY === "2" ? 2 : 1,

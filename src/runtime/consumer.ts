@@ -7,6 +7,7 @@ import { processDelivery } from "../application/delivery.js";
 import { processUpdate } from "../application/update.js";
 import { processScan } from "../application/scan-job.js";
 import { processKeyScan } from "../application/keys.js";
+import { processNewsFeed, processNewsDelivery } from "../application/news.js";
 
 export async function processJob(
   job: QueueJob,
@@ -14,6 +15,10 @@ export async function processJob(
   now: number,
 ): Promise<number | null> {
   switch (job.kind) {
+    case "newsfeed":
+      return processNewsFeed(job.id, context, now);
+    case "newsdelivery":
+      return processNewsDelivery(job.id, context, now);
     case "tick":
       await schedule(context, now, job.initialize, job.part);
       return null;

@@ -1,4 +1,4 @@
-import { bestRetail } from "../../domain/key-pricing.js";
+import { bestRetail, bestRegular } from "../../domain/key-pricing.js";
 import { ApiError } from "../http.js";
 import type { GgPrices } from "../../domain/key-pricing.js";
 import { escapeHtml, money, formatExpiry } from "../../telegram/formatters.js";
@@ -68,7 +68,13 @@ export class KeysRepository {
       .bind(until)
       .run();
   }
-  async map(id: string, title: string, appId: number | null, now: number) {
+  async map(
+    id: string,
+    title: string,
+    appId: number | null,
+    now: number,
+    releaseYear: number | null = null,
+  ) {
     const changed =
       "EXISTS(SELECT 1 FROM key_games g WHERE g.game_id=? AND g.steam_app_id IS NOT ?)";
     await this.db.batch([
@@ -85,19 +91,24 @@ export class KeysRepository {
         .bind(id, id, appId),
       this.db
         .prepare(
-          `INSERT INTO key_games(game_id,title,steam_app_id,mapped_at) VALUES(?,?,?,?)
-      ON CONFLICT(game_id) DO UPDATE SET title=excluded.title,steam_app_id=excluded.steam_app_id,mapped_at=excluded.mapped_at`,
+          `INSERT INTO key_games(game_id,title,steam_app_id,mapped_at,release_year,release_checked_at) VALUES(?,?,?,?,?,?)
+      ON CONFLICT(game_id) DO UPDATE SET title=excluded.title,steam_app_id=excluded.steam_app_id,mapped_at=excluded.mapped_at,release_year=excluded.release_year,release_checked_at=excluded.release_checked_at`,
         )
-        .bind(id, title, appId, now),
+        .bind(id, title, appId, now, releaseYear, now),
     ]);
   }
   async mapping(id: string) {
     return this.db
       .prepare(
-        "SELECT steam_app_id AS appId,mapped_at AS at FROM key_games WHERE game_id=?",
+        "SELECT steam_app_id AS appId,mapped_at AS at,release_year AS releaseYear,release_checked_at AS releaseCheckedAt FROM key_games WHERE game_id=?",
       )
       .bind(id)
-      .first<{ appId: number | null; at: number }>();
+      .first<{
+        appId: number | null;
+        at: number;
+        releaseYear: number | null;
+        releaseCheckedAt: number;
+      }>();
   }
   async selectPool(games: Array<{ id: string; title: string }>, now: number) {
     await this.db.batch([
@@ -146,14 +157,31 @@ export class KeysRepository {
           historicalKeyCents: r.historical_key_cents,
           historicalRetailCents: r.historical_retail_cents,
           observedAt: r.observed_at,
+          regularCents: r.regular_cents,
         },
       ]),
     );
   }
-  async compareRetail(official: Map<string, Array<{ priceCents: number }>>) {
+  async compareRetail(
+    official: Map<
+      string,
+      Array<{
+        priceCents: number;
+        shopId?: number;
+        regularCents?: number | null;
+      }>
+    >,
+  ) {
     const prices = await this.prices([...official.keys()]);
     const values = [...prices].map(([id, p]) => ({
       id,
+      regular: bestRegular(
+        (official.get(id) ?? []).map((q) => ({
+          shopId: q.shopId ?? 0,
+          regularCents: q.regularCents ?? null,
+          priceCents: q.priceCents,
+        })),
+      ),
       retail: bestRetail(
         p.ggRetailCents,
         ...(official.get(id) ?? []).map((q) => q.priceCents),
@@ -162,7 +190,7 @@ export class KeysRepository {
     if (values.length)
       await this.db
         .prepare(
-          `UPDATE key_prices SET retail_cents=json_extract(q.value,'$.retail') FROM json_each(?) q WHERE game_id=json_extract(q.value,'$.id')`,
+          `UPDATE key_prices SET retail_cents=json_extract(q.value,'$.retail'),regular_cents=json_extract(q.value,'$.regular') FROM json_each(?) q WHERE game_id=json_extract(q.value,'$.id')`,
         )
         .bind(JSON.stringify(values))
         .run();
@@ -172,7 +200,7 @@ export class KeysRepository {
       await this.db
         .prepare(
           `SELECT p.game_id FROM key_prices p JOIN key_games g USING(game_id)
-      WHERE (g.general=1 OR EXISTS(SELECT 1 FROM wishlist w WHERE w.game_id=g.game_id)) AND p.observed_at>? AND p.key_cents>0 AND p.key_cents<=1000 AND p.retail_cents>0 AND p.key_cents*2<=p.retail_cents ORDER BY p.key_cents`,
+      WHERE (g.general=1 OR EXISTS(SELECT 1 FROM wishlist w WHERE w.game_id=g.game_id)) AND p.observed_at>? AND p.key_cents>0 AND p.regular_cents>3000 AND p.key_cents*2<=p.regular_cents AND p.key_cents<p.retail_cents ORDER BY p.key_cents`,
         )
         .bind(now - 3600000)
         .all<{ game_id: string }>()
@@ -219,22 +247,23 @@ export class KeysRepository {
           : "",
       })),
     );
-    const owners = `WITH q AS (SELECT json_extract(value,'$.id') AS game_id,json_extract(value,'$.keyCents') AS price,json_extract(value,'$.retail') AS retail,json_extract(value,'$.text') AS text,json_extract(value,'$.appId') AS app_id FROM json_each(?)),
+    const owners = `WITH q AS (SELECT json_extract(value,'$.id') AS game_id,json_extract(value,'$.keyCents') AS price,json_extract(value,'$.retail') AS retail,json_extract(value,'$.regularCents') AS regular,json_extract(value,'$.text') AS text,json_extract(value,'$.appId') AS app_id FROM json_each(?)),
       owners AS (SELECT 'wishlist' AS mode,w.user_id AS owner,w.game_id,w.added_at AS generation,
         MAX(10,COALESCE(w.min_discount_pct,p.min_discount_pct,10)) AS threshold FROM wishlist w LEFT JOIN user_prefs p ON p.user_id=w.user_id JOIN q ON q.game_id=w.game_id
-        UNION ALL SELECT 'general',c.value,q.game_id,0,10 FROM json_each(?) c CROSS JOIN q)`;
+        UNION ALL SELECT 'general',c.value,q.game_id,0,10 FROM json_each(?) c CROSS JOIN q
+        WHERE EXISTS(SELECT 1 FROM key_games g WHERE g.game_id=q.game_id AND g.release_year IN (2026,2027)))`;
     const statements = [
       this.db
         .prepare(
-          `INSERT INTO key_prices(game_id,app_id,key_cents,retail_cents,gg_retail_cents,historical_key_cents,historical_retail_cents,url,observed_at)
-        SELECT json_extract(value,'$.id'),json_extract(value,'$.appId'),json_extract(value,'$.keyCents'),json_extract(value,'$.retail'),json_extract(value,'$.retailCents'),json_extract(value,'$.historicalKeyCents'),json_extract(value,'$.historicalRetailCents'),json_extract(value,'$.url'),?
+          `INSERT INTO key_prices(game_id,app_id,key_cents,retail_cents,gg_retail_cents,historical_key_cents,historical_retail_cents,url,observed_at,regular_cents)
+        SELECT json_extract(value,'$.id'),json_extract(value,'$.appId'),json_extract(value,'$.keyCents'),json_extract(value,'$.retail'),json_extract(value,'$.retailCents'),json_extract(value,'$.historicalKeyCents'),json_extract(value,'$.historicalRetailCents'),json_extract(value,'$.url'),?,json_extract(value,'$.regularCents')
         FROM json_each(?) WHERE json_extract(value,'$.present')=1
-        ON CONFLICT(game_id) DO UPDATE SET app_id=excluded.app_id,key_cents=excluded.key_cents,retail_cents=excluded.retail_cents,gg_retail_cents=excluded.gg_retail_cents,historical_key_cents=excluded.historical_key_cents,historical_retail_cents=excluded.historical_retail_cents,url=excluded.url,observed_at=excluded.observed_at`,
+        ON CONFLICT(game_id) DO UPDATE SET app_id=excluded.app_id,key_cents=excluded.key_cents,retail_cents=excluded.retail_cents,gg_retail_cents=excluded.gg_retail_cents,historical_key_cents=excluded.historical_key_cents,historical_retail_cents=excluded.historical_retail_cents,url=excluded.url,observed_at=excluded.observed_at,regular_cents=excluded.regular_cents`,
         )
         .bind(now, data),
       this.db
         .prepare(
-          `UPDATE key_prices SET key_cents=NULL,retail_cents=NULL,observed_at=? WHERE game_id IN (SELECT json_extract(value,'$.id') FROM json_each(?) WHERE NOT json_extract(value,'$.present'))`,
+          `UPDATE key_prices SET key_cents=NULL,retail_cents=NULL,regular_cents=NULL,observed_at=? WHERE game_id IN (SELECT json_extract(value,'$.id') FROM json_each(?) WHERE NOT json_extract(value,'$.present'))`,
         )
         .bind(now, data),
       this.db
@@ -244,7 +273,7 @@ export class KeysRepository {
         .bind(data),
       this.db
         .prepare(
-          `UPDATE deliveries SET status='expired' WHERE source IN ('keyshop','keydeal') AND status='pending' AND EXISTS(SELECT 1 FROM json_each(?) q WHERE game_id=json_extract(q.value,'$.id') AND (json_extract(q.value,'$.keyCents') IS NULL OR price_cents!=json_extract(q.value,'$.keyCents') OR (source='keydeal' AND (json_extract(q.value,'$.retail') IS NULL OR json_extract(q.value,'$.retail')<=0 OR price_cents*2>json_extract(q.value,'$.retail')))))`,
+          `UPDATE deliveries SET status='expired' WHERE source IN ('keyshop','keydeal') AND status='pending' AND EXISTS(SELECT 1 FROM json_each(?) q WHERE game_id=json_extract(q.value,'$.id') AND (json_extract(q.value,'$.keyCents') IS NULL OR price_cents!=json_extract(q.value,'$.keyCents') OR (source='keydeal' AND (json_extract(q.value,'$.retail') IS NULL OR json_extract(q.value,'$.regularCents') IS NULL OR json_extract(q.value,'$.regularCents')<=3000 OR price_cents*2>json_extract(q.value,'$.regularCents') OR price_cents>=json_extract(q.value,'$.retail')))))`,
         )
         .bind(data),
     ];
@@ -257,10 +286,10 @@ export class KeysRepository {
         INSERT INTO deliveries(id,kind,source,chat_id,text,due_at,expires_at,wishlist_user_id,game_id,price_cents,price_generation,key_app_id)
         SELECT (CASE WHEN o.mode='wishlist' THEN 'keyshop' ELSE 'keydeal' END)||':'||o.owner||':'||o.game_id||':'||o.generation||':'||q.app_id||':'||COALESCE(k.notified,k.baseline,'new')||':'||q.price,
           'price',CASE WHEN o.mode='wishlist' THEN 'keyshop' ELSE 'keydeal' END,o.owner,
-          '🔔 <b>'||(CASE WHEN o.mode='wishlist' THEN 'Ribasso key wishlist' ELSE 'Affare key' END)||'</b>\n'||q.text,?,?,o.owner,o.game_id,q.price,o.generation,q.app_id
+          '🔔 <b>'||(CASE WHEN o.mode='wishlist' THEN 'Ribasso key wishlist' ELSE 'Affare key' END)||'</b>\n'||q.text||(CASE WHEN o.mode='general' THEN '\nListino autorizzato: '||printf('%.2f',q.regular/100.0)||'€ · almeno 50% sotto listino' ELSE '' END),?,?,o.owner,o.game_id,q.price,o.generation,q.app_id
         FROM owners o JOIN q ON q.game_id=o.game_id LEFT JOIN key_alert_state k ON k.mode=o.mode AND k.owner_id=o.owner AND k.game_id=o.game_id AND k.generation=o.generation
         WHERE q.price>0 AND ((o.mode='wishlist' AND COALESCE(k.notified,k.baseline)>0 AND q.price*100<=COALESCE(k.notified,k.baseline)*(100-o.threshold))
-          OR (o.mode='general' AND q.price<=1000 AND q.retail>0 AND q.price*2<=q.retail AND (COALESCE(k.notified,k.baseline) IS NULL OR q.price*100<=COALESCE(k.notified,k.baseline)*90)))
+          OR (o.mode='general' AND q.regular>3000 AND q.price*2<=q.regular AND q.price<q.retail AND (COALESCE(k.notified,k.baseline) IS NULL OR q.price*100<=COALESCE(k.notified,k.baseline)*90)))
         AND NOT EXISTS(SELECT 1 FROM blocked_chats WHERE chat_id=o.owner)
         AND NOT EXISTS(SELECT 1 FROM deliveries d WHERE d.source=CASE WHEN o.mode='wishlist' THEN 'keyshop' ELSE 'keydeal' END AND d.wishlist_user_id=o.owner AND d.game_id=o.game_id AND d.status IN('pending','processing'))
         ON CONFLICT(id) DO UPDATE SET status='pending',due_at=excluded.due_at,expires_at=excluded.expires_at,text=excluded.text,key_app_id=excluded.key_app_id,price_generation=excluded.price_generation,lease_until=NULL,lease_token=NULL,attempts=0 WHERE deliveries.status='expired'`,
@@ -271,7 +300,7 @@ export class KeysRepository {
         this.db
           .prepare(
             `${owners} INSERT INTO key_alert_state(mode,owner_id,game_id,baseline,observed,generation)
-        SELECT o.mode,o.owner,o.game_id,CASE WHEN q.price>0 AND (o.mode='wishlist' OR (? AND q.price<=1000 AND q.retail>0 AND q.price*2<=q.retail)) THEN q.price ELSE NULL END,q.price,o.generation FROM owners o JOIN q ON q.game_id=o.game_id WHERE 1
+        SELECT o.mode,o.owner,o.game_id,CASE WHEN q.price>0 AND (o.mode='wishlist' OR (? AND q.regular>3000 AND q.price*2<=q.regular AND q.price<q.retail)) THEN q.price ELSE NULL END,q.price,o.generation FROM owners o JOIN q ON q.game_id=o.game_id WHERE 1
         ON CONFLICT(mode,owner_id,game_id) DO UPDATE SET observed=excluded.observed,
         baseline=CASE WHEN generation!=excluded.generation THEN excluded.baseline ELSE COALESCE(baseline,excluded.baseline) END,
         notified=CASE WHEN generation!=excluded.generation THEN NULL ELSE notified END,generation=excluded.generation`,
