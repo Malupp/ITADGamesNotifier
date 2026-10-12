@@ -42,7 +42,9 @@ export class NewsFeedClient {
     cache: FeedCache = {},
   ): Promise<FeedResult> {
     try {
-      const response = await this.fetcher(feed.url, {
+      // Native Workers fetch rejects a NewsFeedClient instance as its receiver.
+      const fetcher = this.fetcher;
+      const response = await fetcher(feed.url, {
         signal: AbortSignal.timeout(10000),
         headers: {
           Accept: "application/rss+xml, application/xml, text/xml",
