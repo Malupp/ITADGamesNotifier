@@ -1,22 +1,22 @@
 export const HELP = `👋 <b>Benvenuto! Giochi PC gratis e prezzi sotto controllo</b>
 
-Ti aiuto a trovare giochi completi da riscattare gratis e a seguire i ribassi dei giochi che desideri. Prezzi in euro per l'Italia; orari e scadenze nel fuso italiano.
+Ti aiuto a trovare giochi completi da riscattare gratis e a seguire i ribassi dei giochi che desideri. Usami in chat privata: nei gruppi non rispondo. Prezzi in euro per l'Italia; orari e scadenze nel fuso italiano.
 
 Ogni comando raccoglie i risultati in un solo messaggio. I pulsanti aggiornano quel messaggio; quando serve, usa Avanti e Indietro. Nelle ricerche puoi tornare ai titoli per scegliere un altro gioco. Per aggiornare prezzi e risultati, ripeti il comando; le selezioni scadono entro 24 ore.
 
 🎁 <b>Giochi gratis da tenere</b>
 /deals — mostra le promozioni gratuite attive verificate.
 Controllo IsThereAnyDeal e confermo la promozione sul negozio ufficiale: al momento la verifica automatica copre Epic Games Store e Steam. Escludo DLC, demo, weekend gratuiti, free-to-play permanenti e offerte che richiedono abbonamenti a pagamento.
-Apri il link e riscatta il gioco prima della scadenza: il bot non lo riscatta per te. Gli avvisi gratuiti arrivano nelle chat configurate.
+Apri il link e riscatta il gioco prima della scadenza: il bot non lo riscatta per te. Gli avvisi gratuiti arrivano soltanto nel canale configurato, con descrizione, copertina quando disponibile, negozio e scadenza.
 
 🔑 <b>Key a prezzi bassissimi</b>
-/keys — affari della selezione monitorata: listino superiore a 30€ e key almeno al 50% sotto listino, più economica dell’offerta autorizzata corrente. Gli avvisi automatici riguardano soltanto giochi del 2026/2027 nelle chat configurate; per lo stesso gioco attendo almeno un altro ribasso del 10%.
+/keys — affari della selezione monitorata: listino superiore a 30€ e key almeno al 50% sotto listino, più economica dell’offerta autorizzata corrente. Gli avvisi automatici riguardano soltanto giochi del 2026/2027 nella tua chat privata, se attivi «Affari giochi recenti» in /notifiche; per lo stesso gioco attendo almeno un altro ribasso del 10%.
 I prezzi key compaiono anche in /cerca, /confronta, /wishlist e nelle offerte senza filtro negozio, quando disponibili. Fonte: <a href="https://gg.deals/">GG.deals</a>, dati aggiornati circa ogni ora; controllo ogni 30 minuti. Il feed gratuito mostra il minimo aggregato, senza indicare il singolo venditore: apri GG.deals e verifica commissioni, negozio e regione di attivazione prima di acquistare.
 
-📰 <b>News italiane · nei gruppi</b>
-/news — mostra lo stato delle news del gruppo.
-/news on o /news off — un amministratore attiva o disattiva tutte le news: videogiochi, film, anime e manga. Anche il bot deve essere amministratore.
-Massimo 3 singole notizie all’ora per gruppo, con titolo, fonte e link. La prima lettura delle fonti è silenziosa; non recupero le pubblicazioni precedenti all’attivazione.
+📰 <b>News italiane · in chat privata</b>
+/news — stato e pulsante per attivare o disattivare le tue news.
+/news on o /news off — attiva o disattiva videogiochi, film, anime e manga in italiano.
+Le news partono spente. Ogni notizia contiene titolo, breve estratto della fonte, immagine quando disponibile, data e link. Massimo 3 tentativi di invio all’ora; prima lettura silenziosa e nessun recupero delle notizie precedenti all’attivazione.
 
 📋 <b>La tua wishlist · in chat privata</b>
 /add &lt;titolo&gt; — cerca un gioco, poi premi il pulsante per aggiungerlo.
@@ -31,6 +31,7 @@ L'aggiunta e il recupero della wishlist registrano il riferimento senza una raff
 Per le key uso un riferimento separato dai negozi autorizzati e la stessa soglia globale o per gioco: avviso su un vero ribasso del prezzo della key, senza attribuire uno sconto di listino che il feed non fornisce.
 
 ⚙️ <b>Personalizza gli avvisi · in chat privata</b>
+/notifiche — due toggle indipendenti: News e Affari giochi recenti, inizialmente spenti. Disattivarli non ferma la wishlist.
 /setsconto — mostra la soglia globale della wishlist.
 <code>/setsconto 20</code> — richiedi almeno un ulteriore ribasso del 20% (valori 10–99).
 /setscontog — scegli una soglia per un singolo gioco o ripristina quella globale.

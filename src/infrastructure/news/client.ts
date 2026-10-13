@@ -1,3 +1,4 @@
+import { plainText, imageUrl } from "../content.js";
 import { XMLParser, XMLValidator } from "fast-xml-parser";
 import { NEWS_TTL, type NewsArticle } from "../../domain/news.js";
 import { articleTopic, type NewsFeed } from "./sources.js";
@@ -18,21 +19,20 @@ const text = (value: any): string =>
     : typeof value?.["#text"] === "string"
       ? value["#text"]
       : "";
-function plain(value: string): string {
-  // CDATA content can itself contain HTML/entity escapes. Parse entities with the XML parser.
-  const stripped = value
-    .replace(/<[^>]*>/g, "")
-    .replace(/[\u0000-\u0008\u000b\u000c\u000e-\u001f]/g, "")
-    .trim();
-  const decoded = new XMLParser({ parseTagValue: false }).parse(
-    "<t>" +
-      stripped.replace(
-        /&(?!#\d+;|#x[\da-f]+;|amp;|lt;|gt;|quot;|apos;)/gi,
-        "&amp;",
-      ) +
-      "</t>",
-  ).t;
-  return text(decoded).replace(/\s+/g, " ").slice(0, 300);
+function feedImage(item: any): string | null {
+  const candidates = [
+    ...array(item["media:content"]).filter(x => !x["@_medium"] || x["@_medium"] === "image").map(x => x["@_url"]),
+    ...array(item["media:thumbnail"]).map(x => x["@_url"]),
+    ...array(item.enclosure).filter(x => /^image\//.test(x["@_type"] ?? "")).map(x => x["@_url"]),
+  ];
+  const content = text(item.description) + " " + text(item["content:encoded"]);
+  const match = /<img\b[^>]*\bsrc\s*=\s*["']([^"']+)["']/i.exec(content);
+  if (match) candidates.push(match[1].replace(/&amp;/g,"&"));
+  for (const candidate of candidates) {
+    const url = imageUrl(candidate);
+    if (url) return url;
+  }
+  return null;
 }
 export class NewsFeedClient {
   constructor(private fetcher: typeof fetch = fetch) {}
@@ -133,7 +133,7 @@ export class NewsFeedClient {
             .replace(/</g, "&lt;")
             .replace(/>/g, "&gt;");
           if (escapedUrl.length > 2048) continue;
-          const title = plain(text(item.title));
+          const title = plainText(text(item.title), 200);
           if (
             !title ||
             !articleTopic(feed, url, array(item.category).map(text), title)
@@ -156,6 +156,8 @@ export class NewsFeedClient {
               url: url.href,
               publishedAt,
               guid: text(item.guid).slice(0, 512) || null,
+              summary: plainText(text(item.description)) || null,
+              imageUrl: feedImage(item),
             });
         }
       return {

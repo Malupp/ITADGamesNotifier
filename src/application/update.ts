@@ -28,9 +28,6 @@ export async function processUpdate(
     outcome: "ok",
   });
   try {
-    const user =
-      claim.update.callback_query?.from ?? claim.update.message?.from;
-    if (user) await context.deliveries.unblockChat(String(user.id));
     await measure(
       "update",
       () => handleUpdate(context, claim.update, claim.createdAt),

@@ -30,8 +30,21 @@ export async function processDelivery(
     await context.deliveries.retryDelivery(d, now + 1800000, "paused");
     return null;
   }
+  const activity = await context.preferences.privateActivity(d.chat_id);
+  let attemptedAt = now;
   try {
+    if (
+      (d.kind !== "giveaway" && !/^[1-9]\d*$/.test(d.chat_id)) ||
+      (d.kind === "giveaway" && (
+        d.chat_id !== context.env.TELEGRAM_CHAT_ID ||
+        await context.telegram.getChatType(d.chat_id) !== "channel"
+      ))
+    ) {
+      await context.deliveries.expireDelivery(d);
+      return null;
+    }
     let text = d.text;
+    let photo: string | null | undefined;
     let previewUrl: string | undefined;
     // Recheck wishlist prices immediately before sending, including rebound/removal.
     if (d.kind === "price" && d.source && d.source !== "itad") {
@@ -89,8 +102,10 @@ export async function processDelivery(
       }
       text = formatGiveaway(valid[0]);
       previewUrl = valid[0].url;
+      photo = valid[0].imageUrl;
     }
     const markup = d.reply_markup ? JSON.parse(d.reply_markup) : undefined;
+    attemptedAt = Math.max(now, context.now());
     if (d.operation === "edit") {
       if (d.kind !== "reply" || d.telegram_message_id === null)
         throw new ApiError(400, undefined, true);
@@ -108,7 +123,9 @@ export async function processDelivery(
     } else
       await measure(
         "delivery",
-        () => context.telegram.sendMessage(d.chat_id, text, markup, previewUrl),
+        () => d.kind === "giveaway"
+          ? context.telegram.sendIllustrated(d.chat_id, text, photo, previewUrl)
+          : context.telegram.sendMessage(d.chat_id, text, markup, previewUrl),
         context.recordTiming,
       );
     await context.deliveries.completeDelivery(d, Date.now());
@@ -155,7 +172,9 @@ export async function processDelivery(
         d,
         errorCode(e),
         e.status === 403,
-        now,
+        Math.max(now, context.now()),
+        activity,
+        attemptedAt,
       );
       return null;
     }

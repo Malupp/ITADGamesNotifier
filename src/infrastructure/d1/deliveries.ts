@@ -19,7 +19,7 @@ const validPendingPrice = `((deliveries.source='itad' AND EXISTS (SELECT 1 FROM 
   AND w.last_observed_price_cents=deliveries.price_cents
   AND COALESCE(w.last_notified_price_cents,w.baseline_price_cents)>0
   AND deliveries.price_cents*100 <= COALESCE(w.last_notified_price_cents,w.baseline_price_cents)
-    *(100-MAX(10,COALESCE(w.min_discount_pct,p.min_discount_pct,10))))) OR (deliveries.source IN ('keyshop','keydeal') AND EXISTS (SELECT 1 FROM key_alert_state k JOIN key_prices q ON q.game_id=k.game_id LEFT JOIN wishlist w ON w.user_id=k.owner_id AND w.game_id=k.game_id LEFT JOIN user_prefs p ON p.user_id=w.user_id WHERE k.owner_id=deliveries.wishlist_user_id AND k.game_id=deliveries.game_id AND q.app_id=deliveries.key_app_id AND k.generation=deliveries.price_generation AND k.observed=deliveries.price_cents AND q.key_cents=deliveries.price_cents AND q.key_cents>0 AND ((deliveries.source='keyshop' AND k.mode='wishlist' AND w.added_at=k.generation AND COALESCE(k.notified,k.baseline)>0 AND q.key_cents*100<=COALESCE(k.notified,k.baseline)*(100-MAX(10,COALESCE(w.min_discount_pct,p.min_discount_pct,10)))) OR (deliveries.source='keydeal' AND k.mode='general' AND EXISTS(SELECT 1 FROM key_games g WHERE g.game_id=deliveries.game_id AND g.release_year IN (2026,2027)) AND q.regular_cents>3000 AND q.key_cents*2<=q.regular_cents AND q.key_cents<q.retail_cents AND (q.key_cents*100<=COALESCE(k.notified,k.baseline)*90 OR (k.notified IS NULL AND (k.baseline IS NULL OR q.key_cents=k.baseline))))))))`;
+    *(100-MAX(10,COALESCE(w.min_discount_pct,p.min_discount_pct,10))))) OR (deliveries.source IN ('keyshop','keydeal') AND EXISTS (SELECT 1 FROM key_alert_state k JOIN key_prices q ON q.game_id=k.game_id LEFT JOIN wishlist w ON w.user_id=k.owner_id AND w.game_id=k.game_id LEFT JOIN user_prefs p ON p.user_id=w.user_id WHERE k.owner_id=deliveries.wishlist_user_id AND k.game_id=deliveries.game_id AND q.app_id=deliveries.key_app_id AND k.generation=deliveries.price_generation AND k.observed=deliveries.price_cents AND q.key_cents=deliveries.price_cents AND q.key_cents>0 AND ((deliveries.source='keyshop' AND k.mode='wishlist' AND w.added_at=k.generation AND COALESCE(k.notified,k.baseline)>0 AND q.key_cents*100<=COALESCE(k.notified,k.baseline)*(100-MAX(10,COALESCE(w.min_discount_pct,p.min_discount_pct,10)))) OR (deliveries.source='keydeal' AND k.mode='general' AND EXISTS(SELECT 1 FROM private_users u WHERE u.user_id=deliveries.chat_id AND u.recent_deals_enabled=1 AND u.recent_deals_generation=deliveries.price_generation) AND EXISTS(SELECT 1 FROM key_games g WHERE g.game_id=deliveries.game_id AND g.release_year IN (2026,2027)) AND q.regular_cents>3000 AND q.key_cents*2<=q.regular_cents AND q.key_cents<q.retail_cents AND (q.key_cents*100<=COALESCE(k.notified,k.baseline)*90 OR (k.notified IS NULL AND (k.baseline IS NULL OR q.key_cents=k.baseline))))))))`;
 
 export class DeliveriesRepository {
   constructor(readonly db: D1Database) {}
@@ -114,7 +114,7 @@ export class DeliveriesRepository {
   async deliveryOffer(delivery: Delivery): Promise<Offer | null> {
     return this.db
       .prepare(
-        `SELECT offer_id AS id,game_id AS gameId,slug,title,shop,url,expires_at AS expiry
+        `SELECT offer_id AS id,game_id AS gameId,slug,title,shop,url,expires_at AS expiry,description,image_url AS imageUrl,genres
       FROM giveaways WHERE ?='giveaway:'||offer_id||':'||?`,
       )
       .bind(delivery.id, delivery.chat_id)
@@ -245,36 +245,54 @@ export class DeliveriesRepository {
     code: string,
     blockChat: boolean,
     now: number,
+    activity: number | null = null,
+    attemptedAt = now,
   ): Promise<void> {
     const statements = [
       this.db
         .prepare(
-          "UPDATE deliveries SET status='blocked',lease_until=NULL,error_code=? WHERE id=? AND lease_token=?",
+          "UPDATE deliveries SET status='blocked',lease_until=NULL,error_code=? WHERE id=? AND lease_token=? AND status='processing' AND lease_until>?",
         )
-        .bind(code, delivery.id, delivery.lease_token),
+        .bind(code, delivery.id, delivery.lease_token, now),
     ];
     if (blockChat) {
       statements.push(
         this.db
           .prepare(
-            "INSERT INTO blocked_chats(chat_id,blocked_at) VALUES(?,?) ON CONFLICT(chat_id) DO UPDATE SET blocked_at=excluded.blocked_at",
+            `INSERT INTO blocked_chats(chat_id,blocked_at) SELECT ?,?
+              WHERE EXISTS(SELECT 1 FROM deliveries WHERE id=? AND status='blocked' AND lease_token=?)
+              AND ? IS (SELECT activity_revision FROM private_users WHERE user_id=?)
+              ON CONFLICT(chat_id) DO UPDATE SET blocked_at=MAX(blocked_chats.blocked_at,excluded.blocked_at)`,
           )
-          .bind(delivery.chat_id, now),
+          .bind(delivery.chat_id, attemptedAt, delivery.id, delivery.lease_token, activity, delivery.chat_id),
+      );
+      statements.push(
+        this.db.prepare(`UPDATE news_subscribers SET enabled=0,generation=generation+1,revision=revision+1,updated_at=?
+          WHERE chat_id=? AND enabled=1 AND EXISTS(SELECT 1 FROM blocked_chats WHERE chat_id=? AND blocked_at=?)
+          AND ? IS (SELECT activity_revision FROM private_users WHERE user_id=?)`)
+          .bind(now, delivery.chat_id, delivery.chat_id, attemptedAt, activity, delivery.chat_id),
       );
       statements.push(
         this.db
           .prepare(
-            "UPDATE deliveries SET status='blocked',error_code=? WHERE chat_id=? AND status='pending'",
+            "UPDATE deliveries SET status='blocked',error_code=? WHERE chat_id=? AND status='pending' AND EXISTS(SELECT 1 FROM blocked_chats WHERE chat_id=? AND blocked_at=?)",
           )
-          .bind(code, delivery.chat_id),
+          .bind(code, delivery.chat_id, delivery.chat_id, attemptedAt),
       );
     }
     await this.db.batch(statements);
   }
-  async unblockChat(chatId: string): Promise<void> {
-    await this.db
-      .prepare("DELETE FROM blocked_chats WHERE chat_id=?")
-      .bind(chatId)
-      .run();
+  async unblockChat(chatId: string, receivedAt = Date.now()): Promise<boolean> {
+    // A blocked recipient must explicitly opt into news again; reopening cannot bypass capacity.
+    await this.db.batch([
+      this.db.prepare(`UPDATE news_subscribers SET enabled=0,generation=generation+1,revision=revision+1,updated_at=?
+        WHERE chat_id=? AND enabled=1 AND EXISTS(SELECT 1 FROM blocked_chats WHERE chat_id=? AND blocked_at<=?)`)
+        .bind(receivedAt, chatId, chatId, receivedAt),
+      this.db
+      .prepare("DELETE FROM blocked_chats WHERE chat_id=? AND blocked_at<=?")
+      .bind(chatId, receivedAt),
+    ]);
+    return !(await this.db.prepare("SELECT 1 FROM blocked_chats WHERE chat_id=?")
+      .bind(chatId).first());
   }
 }

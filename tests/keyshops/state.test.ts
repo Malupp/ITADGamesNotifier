@@ -1,3 +1,4 @@
+import { enrollPrivateUsers } from "../helpers/notifications.js";
 import test from "node:test";
 import assert from "node:assert/strict";
 import { testDatabase } from "../helpers/sqlite.js";
@@ -17,6 +18,7 @@ const price = {
 };
 test("shared budget atomically enforces minute and hour limits including retries", async () => {
   const t = testDatabase();
+  await enrollPrivateUsers(t.db,["9"],0,true);
   const r = new KeysRepository(t.db);
   const at = 3600000;
   await r.reserve(100, at);
@@ -31,9 +33,10 @@ test("key baseline is quiet, independent, and advances only on confirmed deliver
     r = new KeysRepository(t.db),
     w = new WishlistRepository(t.db),
     d = new DeliveriesRepository(t.db);
+  await enrollPrivateUsers(t.db,["9"],0,true);
   await w.addWishlist("user", null, game, null, 1);
   await r.map(game.id, game.title, 620, 1, 2026);
-  await r.observe(game.id, price, 3000, 1, false, ["channel"]);
+  await r.observe(game.id, price, 3000, 1, false, ["9"]);
   assert.equal((await d.pendingDeliveries(1)).length, 1); // new general bargain; wishlist quiet
   await r.observe(game.id, { ...price, keyCents: 950 }, 3000, 2, false, []);
   assert.equal(
@@ -82,12 +85,13 @@ test("quiet discovery, real comparisons, rebound and changed preferences invalid
     r = new KeysRepository(t.db),
     w = new WishlistRepository(t.db),
     d = new DeliveriesRepository(t.db);
+  await enrollPrivateUsers(t.db,["9"],0,true);
   await w.addWishlist("u", null, game, null, 1);
   await r.map(game.id, game.title, 620, 1, 2026);
-  await r.observe(game.id, price, 3000, 1, true, ["channel"]);
+  await r.observe(game.id, price, 3000, 1, true, ["9"]);
   assert.deepEqual(await d.pendingDeliveries(1), []);
   await r.observe(game.id, { ...price, keyCents: 800 }, 3000, 2, false, [
-    "channel",
+    "9",
   ]);
   assert.equal((await d.pendingDeliveries(2)).length, 2);
   await w.setWishlistDiscount("u", game.id, 30);
@@ -99,7 +103,7 @@ test("quiet discovery, real comparisons, rebound and changed preferences invalid
     "expired",
   );
   await r.observe(game.id, { ...price, keyCents: 950 }, 0, 3, false, [
-    "channel",
+    "9",
   ]);
   await d.cancelInvalidPending(3);
   assert.equal(
@@ -114,19 +118,20 @@ test("new general bargain stays eligible through a changed price before its firs
   const t = testDatabase(),
     r = new KeysRepository(t.db),
     d = new DeliveriesRepository(t.db);
+  await enrollPrivateUsers(t.db,["9"],0,true);
   await r.map(game.id, game.title, 620, 1, 2026);
   await r.observe(game.id, { ...price, keyCents: 1500 }, 3000, 1, true, [
-    "channel",
+    "9",
   ]);
   await r.observe(game.id, { ...price, keyCents: 800 }, 3000, 2, false, [
-    "channel",
+    "9",
   ]);
   await r.observe(game.id, { ...price, keyCents: 850 }, 3000, 3, false, [
-    "channel",
+    "9",
   ]);
   await d.cancelInvalidPending(3);
   await r.observe(game.id, { ...price, keyCents: 850 }, 3000, 4, false, [
-    "channel",
+    "9",
   ]);
   const pending = await d.pendingDeliveries(4);
   assert.equal(pending.length, 1);
@@ -138,6 +143,7 @@ test("an old processing key delivery cannot advance a re-added wishlist generati
     r = new KeysRepository(t.db),
     w = new WishlistRepository(t.db),
     d = new DeliveriesRepository(t.db);
+  await enrollPrivateUsers(t.db,["9"],0,true);
   await w.addWishlist("u", null, game, null, 1);
   await r.map(game.id, game.title, 620, 1, 2026);
   await r.observe(game.id, price, 3000, 1, true, []);
@@ -157,6 +163,7 @@ test("an old processing key delivery cannot advance a re-added wishlist generati
 });
 test("twenty games and two destinations use a bounded number of D1 statements", async () => {
   const t = testDatabase();
+  await enrollPrivateUsers(t.db,["9","10"],0,true);
   let queries = 0;
   const db = {
     ...t.db,
@@ -174,7 +181,7 @@ test("twenty games and two destinations use a bounded number of D1 statements", 
     })),
     1,
     true,
-    ["channel", "group"],
+    ["9", "10"],
   );
   assert.ok(queries <= 10, `queries: ${queries}`);
   t.close();
@@ -184,6 +191,7 @@ test("retired mapping cannot complete into a new app baseline", async () => {
     r = new KeysRepository(t.db),
     w = new WishlistRepository(t.db),
     d = new DeliveriesRepository(t.db);
+  await enrollPrivateUsers(t.db,["9"],0,true);
   await w.addWishlist("u", null, game, null, 1);
   await r.map(game.id, game.title, 620, 1, 2026);
   await r.observe(game.id, price, 3000, 1, true, []);
@@ -211,9 +219,10 @@ test("same-price delivery after mapping change keeps the new app identity", asyn
   const t = testDatabase(),
     r = new KeysRepository(t.db),
     d = new DeliveriesRepository(t.db);
+  await enrollPrivateUsers(t.db,["9"],0,true);
   await r.map(game.id, game.title, 620, 1, 2026);
   await r.observe(game.id, { ...price, keyCents: 800 }, 3000, 1, false, [
-    "channel",
+    "9",
   ]);
   await r.map(game.id, game.title, 621, 2, 2026);
   await r.observe(
@@ -222,7 +231,7 @@ test("same-price delivery after mapping change keeps the new app identity", asyn
     3000,
     3,
     false,
-    ["channel"],
+    ["9"],
   );
   await d.cancelInvalidPending(3);
   const pending = await d.pendingDeliveries(3);

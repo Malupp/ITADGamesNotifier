@@ -28,7 +28,7 @@ export async function handleRequest(
           (await context.settings.getSetting("giveaways_seeded")) === "true",
         keysEnabled: keysEnabled(context),
         newsEnabled: newsEnabled(context),
-        newsActiveGroups: (await context.news.activeGroups()).length,
+        newsActiveSubscribers: (await context.news.activeSubscribers()).length,
         keysSeeded:
           (await context.settings.getSetting("keys_seeded")) === "true",
         lastKeyScan: await context.settings.getSetting("last_key_scan"),

@@ -69,10 +69,7 @@ export async function processScan(
       );
       await context.giveaways.ingestGiveaways(
         verified,
-        [
-          context.env.TELEGRAM_CHAT_ID ?? "",
-          context.env.TELEGRAM_CHAT_GROUP ?? "",
-        ],
+        [context.env.TELEGRAM_CHAT_ID ?? ""],
         now,
         task.baseline,
       );

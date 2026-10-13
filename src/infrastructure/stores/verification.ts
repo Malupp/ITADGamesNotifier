@@ -1,3 +1,4 @@
+import { plainText, imageUrl } from "../content.js";
 import { ApiError } from "../http.js";
 import type { Offer, PriceQuote } from "../../domain/models.js";
 // A campaign alone is insufficient: require an actual 100% EUR sale in IT
@@ -70,6 +71,9 @@ export async function confirmOfficialGiveaways(
       )
         verified.push({
           ...o,
+          description: plainText(game.description) || null,
+          imageUrl: imageUrl((game.keyImages ?? []).find((x: any) => ["OfferImageWide","DieselStoreFrontWide","Thumbnail"].includes(x.type))?.url) || null,
+          genres: null,
           expiry: Math.min(o.expiry ?? Infinity, Date.parse(promo.endDate)),
         });
     } else if (
@@ -94,7 +98,12 @@ export async function confirmOfficialGiveaways(
         data.price_overview.initial > 0 &&
         data.price_overview.discount_percent === 100
       )
-        verified.push(o);
+        verified.push({
+          ...o,
+          description: plainText(data.short_description) || null,
+          imageUrl: imageUrl(data.header_image),
+          genres: plainText((data.genres ?? []).map((g: any) => g.description).join(", "), 100) || null,
+        });
     }
   }
   return verified;

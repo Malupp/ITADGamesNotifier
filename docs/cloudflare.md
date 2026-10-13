@@ -1,18 +1,20 @@
 # Gestione del notifier su Cloudflare Free
 
-## Rilascio delle news RSS
+## Rilascio delle notifiche private e dei messaggi illustrati
 
-La migrazione additiva `0007_news.sql` e la configurazione `NEWS_ENABLED=false` preparano il servizio senza avviare invii. Il ramo comprende anche `0006_key_release_year.sql`, che restringe gli avvisi generali key al 2026 e 2027: considerare entrambe le modifiche nel bundle di rilascio.
+Le migrazioni `0010_private_notifications.sql` e `0011_private_activity_revision.sql` aggiungono gli utenti privati, i toggle personali e i metadati per estratti/copertine. Le vecchie iscrizioni dei gruppi restano archiviate e disattivate; news e affari generali pendenti vengono invalidati. Gli avvisi wishlist e i giveaway pendenti del canale vengono conservati. Gli eventuali giveaway pendenti verso gruppi sono scartati dal nuovo Worker al controllo del tipo di chat. Nessun utente viene abilitato automaticamente.
 
-Prima del rilascio remoto creare un nuovo backup D1 privato e provarne il ripristino locale come descritto sotto. Eseguire suite, typecheck, build dry run, migrazioni locali e `npx tsx scripts/diagnostics/news-feeds.ts`. Lo script legge soltanto feed pubblici, senza Telegram o dati dei gruppi.
+Prima del rilascio remoto creare un backup D1 privato e verificarne il ripristino locale. Eseguire suite, typecheck, build dry run, migrazioni locali e `npx tsx scripts/diagnostics/news-feeds.ts`. Lo script legge soltanto feed pubblici e non invia messaggi Telegram.
 
-Applicare le migrazioni remote e distribuire il Worker mantenendo **NEWS_ENABLED=false**. Nessun gruppo viene abilitato automaticamente. In un gruppo di prova concordato, promuovere il bot ad amministratore e usare `/news on`; impostare quindi `NEWS_ENABLED=true` per il collaudo del servizio. La prima lettura delle fonti è silenziosa; i nuovi articoli dei cicli successivi verificano attribuzione, aree, dedup e limite. Gli altri gruppi restano spenti. Solo dopo il collaudo abilitare i gruppi desiderati con `/news on`.
+Sospendere temporaneamente le scansioni con `SCANS_ENABLED=false`, applicare entrambe le migrazioni e distribuire il nuovo Worker. Questo evita che il vecchio Worker continui a produrre invii nei gruppi durante la transizione. Ripristinare quindi la configurazione delle scansioni. In una chat privata di prova usare `/start`, `/notifiche` e `/news on`: verificare toggle indipendenti, spegnimento con consegne pendenti, foto ed estratto, prima lettura silenziosa e limite orario. L’attivazione resta una scelta personale di ogni utente.
 
-Per sospendere soltanto le news, distribuire `NEWS_ENABLED=false`; per sospendere tutti gli avvisi automatici usare `SCANS_ENABLED=false`. Per rollback del codice conservare le tabelle additive e tornare alla versione precedente: non cancellare tabelle o ripristinare il backup sopra dati nuovi senza una decisione esplicita. Per spegnere un singolo gruppo usare `/news off`; i suoi lavori pendenti diventano obsoleti.
+`TELEGRAM_CHAT_ID` deve identificare il canale dei giochi gratis; prima di ogni pubblicazione il Worker verifica il tipo `channel`. Il secret legacy `TELEGRAM_CHAT_GROUP` è ignorato. Il canale non riceve news, prezzi wishlist o affari recenti. Nel menu Telegram aggiungere il comando `notifiche` con descrizione «Gestisci news e affari giochi recenti»; il menu è configurazione indipendente dal deploy.
 
-Il cap iniziale è dieci gruppi. A pieno uso: otto feed × 48 cicli = 384 job feed/giorno, fino a 720 tentativi news/giorno nei dieci gruppi, più 48 tick news. Con tre operazioni Queue per messaggio fanno circa **3456 operazioni/giorno aggiuntive**, prima dei retry e dei lavori già esistenti. È una stima massima ordinaria: errori, backlog, richieste interattive e burst vanno misurati sul dashboard. Verificare il margine delle quote Workers, D1 e Queues prima dell’attivazione o dell’aumento della capacità; il parser sui feed reali va misurato nel Worker, i test Node non dimostrano il margine CPU remoto.
+Per sospendere soltanto le news impostare `NEWS_ENABLED=false`; per sospendere tutti gli avvisi usare `SCANS_ENABLED=false`. `/news off` e i toggle di `/notifiche` invalidano la rispettiva coda personale. Un invio Telegram già partito può completarsi. In caso di rollback sospendere prima le scansioni: il Worker precedente torna alle destinazioni di gruppo/canale dei vecchi affari. Conservare le nuove tabelle e i dati privati senza ripristinare il backup sopra dati nuovi.
 
-`/admin/status` espone `newsEnabled` e il conteggio aggregato `newsActiveGroups`, protetti dal secret webhook. Per SQL diagnostico usare conteggi aggregati di `news_jobs`, `news_deliveries` e `news_send_attempts`, senza esportare chat ID nei log. Una fonte indisponibile viene ritentata al massimo cinque volte per ciclo e non blocca le altre. I job e lo storico terminati vengono eliminati in lotti dopo sette giorni; i tentativi dopo 24 ore.
+Il cap iniziale resta dieci iscritti news. Otto feed × 48 cicli sono 384 job feed/giorno; fino a 720 tentativi news/giorno e 48 tick portano a circa **3456 operazioni Queue/giorno aggiuntive**, prima dei retry e dei lavori esistenti. Anche il ripiego da foto a testo consuma un nuovo tentativo. Le fonti RSS e le risposte ufficiali degli store vengono riutilizzate per i metadati, senza scaricare gli articoli. Verificare il margine delle quote Workers, D1 e Queues sul dashboard prima di aumentare capacità o utenti.
+
+`/admin/status` espone `newsEnabled` e il conteggio `newsActiveSubscribers`, protetti dal secret webhook. Un contatore di attività privata e i token delle consegne impediscono a un errore d’invio vecchio di bloccare un utente tornato attivo. Un utente che sblocca il bot deve riattivare le news, rispettando il limite di iscritti. Lo storico termina dopo sette giorni e i tentativi dopo 24 ore. Una fonte guasta viene ritentata al massimo cinque volte per ciclo e non blocca le altre. Nessun rilascio remoto è implicito nelle verifiche locali.
 
 ## Stato verificato l'8 ottobre 2026
 
@@ -40,7 +42,7 @@ Il notifier cerca giochi PC completi riscattabili dall'Italia e conservabili sen
 
 La conferma ufficiale implementata copre **Epic Games Store e Steam**. Gli altri negozi sono esclusi quando manca una conferma sufficiente: una lista vuota può indicare copertura limitata. Epic viene verificato per slug esatto, gioco base, regione Italia e promozione attiva; Steam per app ID, tipo gioco, regione Italia e prezzo effettivo. La verifica viene ripetuta prima della consegna.
 
-`/start` e `/help` mostrano la guida italiana completa: comandi, esempi, configurazione wishlist, soglie di ribasso, fonti e modalità di riscatto. La guida resta in un unico messaggio HTML entro il limite Telegram. Il menu Telegram dell'installazione è stato aggiornato e riletto con tutti i 14 comandi; è configurazione del bot, indipendente dal deploy del Worker. Per altre installazioni registrare le descrizioni con [setMyCommands](https://core.telegram.org/bots/api#setmycommands). Gli avvisi gratuiti vengono inviati soltanto alle destinazioni configurate nei secrets; `/start` non aggiunge automaticamente l'utente a una distribuzione globale. Gli avvisi wishlist sono personali.
+`/start` e `/help` mostrano la guida italiana completa: comandi, esempi, configurazione wishlist, soglie di ribasso, fonti e modalità di riscatto. La guida resta in un unico messaggio HTML entro il limite Telegram. Il menu Telegram dell'installazione è stato aggiornato e riletto con tutti i 14 comandi; è configurazione del bot, indipendente dal deploy del Worker. Per altre installazioni registrare le descrizioni con [setMyCommands](https://core.telegram.org/bots/api#setmycommands). Gli avvisi gratuiti vengono inviati soltanto al canale configurato in `TELEGRAM_CHAT_ID`; `/start` non aggiunge automaticamente l'utente a una distribuzione globale. Gli avvisi wishlist sono personali.
 
 L'ispirazione GetFree riguarda la distinzione fra negozio, piattaforma di riscatto, eventuale abbonamento e disponibilità attuale. GetFree e le sue API interne non costituiscono una fonte di verità o un contratto usato dal runtime. Non viene eseguito un confronto fuzzy per titolo su GG.deals; i confronti disponibili restano quelli ITAD associati all'ID esatto.
 
@@ -90,7 +92,7 @@ npx wrangler secret put TELEGRAM_WEBHOOK_SECRET
 npx wrangler secret put ITAD_API_KEY
 npx wrangler secret put TELEGRAM_CHAT_ID
 # Solo se è prevista una destinazione di gruppo:
-npx wrangler secret put TELEGRAM_CHAT_GROUP
+# TELEGRAM_CHAT_GROUP è legacy e non viene più letto dal runtime.
 npm run db:remote
 npm run deploy
 ```
@@ -203,3 +205,13 @@ Il filtro degli avvisi key generali è ora2026/2027, listino ufficiale oltre30EU
 Configurazione globale NEWS_ENABLED=true, SCANS_ENABLED=true, KEYSHOPS_ENABLED=true e REVIEW_CONCURRENCY=1; nessun gruppo news abilitato automaticamente. Health e admin/status200, newsEnabled=true e newsActiveGroups=0, webhook corretto e nessun update Telegram pendente. Menu con16 comandi inclusa news; il bot è amministratore della destinazione di gruppo configurata. Per attivare le news, un amministratore usa /news on nel gruppo. La prima lettura delle fonti è silenziosa. Il primo traffico RSS in un gruppo attivato resta il collaudo delle quote reali; questa verifica non ha inviato messaggi news artificiali né abilitato gruppi.
 
 Primo controllo online completato: 116 metadati di uscita ricaricati, 31 listini oltre 30€ acquisiti, nessun job key attivo e nessun affare generale pendente. Il campione monitorato contiene un gioco con anno 2026/2027: non è una copertura completa delle nuove uscite. Nessun avviso generale non idoneo è rimasto in coda.
+
+## Rilascio verificato il 13 ottobre 2026 · notifiche private
+
+Migrazioni remote `0010_private_notifications.sql` e `0011_private_activity_revision.sql` applicate. Worker pubblicato al 100% nella versione `edf22a93-43c2-4ab4-9f47-2abc419ea64f`, con `SCANS_ENABLED=true`, `NEWS_ENABLED=true` e `KEYSHOPS_ENABLED=true`. Durante la transizione la versione precedente è stata temporaneamente pubblicata con scansioni sospese; nessuna consegna o scansione risultava in elaborazione prima delle migrazioni.
+
+Backup D1 privato creato prima della migrazione, ripristinato in SQLite e verificato con `integrity_check=ok`. Conservati i conteggi di wishlist, preferenze e giveaway; news e affari recenti non sono stati attivati per nessun utente. Le vecchie iscrizioni dei gruppi sono disattivate. Backup e prove operative sono nella directory protetta e ignorata `migration-private/release-2026-10-13-private-notifications/`.
+
+Health HTTP200 con scansioni attive; webhook Telegram corretto, zero aggiornamenti pendenti e nessun errore dichiarato. Destinazione verificata come canale, con bot amministratore e permesso di pubblicazione. Il menu contiene 17 comandi nelle chat private, incluso `/notifiche`; menu predefinito e menu dei gruppi vuoti. Nessun messaggio artificiale inviato per il collaudo.
+
+Prima del rilascio: 187 test superati, TypeScript e build dry run riusciti. Il primo invio reale con foto dopo attivazione personale delle news o dopo una nuova promozione gratuita resta il collaudo dell'interfaccia Telegram; non sono state modificate le preferenze degli utenti per forzarlo.

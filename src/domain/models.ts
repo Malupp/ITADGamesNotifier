@@ -18,6 +18,9 @@ export interface PriceQuote {
   expiry: number | null;
 }
 export interface Offer {
+  description?: string | null;
+  imageUrl?: string | null;
+  genres?: string | null;
   id: string;
   gameId: string;
   slug: string;

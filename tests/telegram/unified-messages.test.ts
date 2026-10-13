@@ -121,21 +121,13 @@ test("remove and discount list navigation edits the same message", async () => {
   } finally { h.close(); }
 });
 
-test("another user cannot navigate or select a saved group search", async () => {
-  const h = setup();
-  try {
-    await handleUpdate(h.context(), msg("/cerca Game", 1, -100));
-    const selection = buttons(h.rows()[0])[0].callback_data;
-    await handleUpdate(h.context(), cb(selection, 2, 8, -100));
-    assert.equal(h.rows().length, 1);
-    assert.ok(!h.calls.includes("/games/prices/v3"));
-    await handleUpdate(h.context(), cb(selection, 3, 7, -100));
-    const prices = h.rows().at(-1);
-    const next = buttons(prices).find(b => /Avanti|titoli/i.test(b.text));
-    assert.ok(next);
-    await handleUpdate(h.context(), cb(next.callback_data, 4, 8, -100));
-    assert.equal(h.rows().length, 2);
-  } finally { h.close(); }
+test("group searches and selections do not query prices or create replies", async () => {
+  const h=setup();try {
+    await handleUpdate(h.context(),msg("/cerca Game",1,-100));
+    await handleUpdate(h.context(),cb(`price|${game(0).id}`,2,7,-100));
+    assert.deepEqual(h.rows(),[]);
+    assert.deepEqual(h.calls,[]);
+  }finally{h.close();}
 });
 
 test("expired result pages explain reopening in the same message", async () => {
@@ -154,31 +146,22 @@ test("expired result pages explain reopening in the same message", async () => {
 });
 
 
-test("another group member cannot cancel a saved search", async () => {
-  const h = setup();
-  try {
-    await handleUpdate(h.context(), msg("/cerca Game", 1, -100));
-    const cancel = buttons(h.rows()[0]).find(b => /Annulla/.test(b.text));
-    assert.ok(cancel);
-    await handleUpdate(h.context(), cb(cancel.callback_data, 2, 8, -100));
-    assert.equal(h.rows().length, 1);
-    await handleUpdate(h.context(), cb(cancel.callback_data, 3, 7, -100));
-    assert.equal(h.rows()[1].operation, "edit");
-    assert.deepEqual(JSON.parse(h.rows()[1].reply_markup), { inline_keyboard: [] });
-  } finally { h.close(); }
+test("group cancellation callbacks are ignored for every member", async () => {
+  const h=setup();try {
+    await handleUpdate(h.context(),cb("cancel",1,8,-100));
+    await handleUpdate(h.context(),cb("cancel",2,7,-100));
+    assert.deepEqual(h.rows(),[]);
+    assert.deepEqual(h.calls,[]);
+  }finally{h.close();}
 });
 
-test("a pruned group view cannot be overwritten by a different user", async () => {
-  const h = setup();
-  try {
-    await handleUpdate(h.context(), msg("/offerte_shop 1-20 30 steam,gog", 1, -100));
-    const next = buttons(h.rows()[0]).find(b => /Avanti/.test(b.text));
-    assert.ok(next);
-    h.expire();
-    await h.context().views.prune(h.context().now());
-    await handleUpdate(h.context(), cb(next.callback_data, 2, 8, -100));
-    assert.equal(h.rows().length, 1);
-  } finally { h.close(); }
+test("old group navigation callbacks cannot recreate replies", async () => {
+  const h=setup();try {
+    await handleUpdate(h.context(),cb("viewpage|old|1",1,8,-100));
+    await handleUpdate(h.context(),cb("viewpage|old|1",2,7,-100));
+    assert.deepEqual(h.rows(),[]);
+    assert.deepEqual(h.calls,[]);
+  }finally{h.close();}
 });
 
 test("giveaway pages stop being navigable when an included promotion expires", async () => {

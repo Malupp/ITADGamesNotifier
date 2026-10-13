@@ -1,3 +1,4 @@
+import { enrollPrivateUsers } from "../helpers/notifications.js";
 import test from "node:test";
 import assert from "node:assert/strict";
 import { testDatabase } from "../helpers/sqlite.js";
@@ -38,13 +39,14 @@ test("ITAD extracts the release year only from a valid calendar date", async () 
 
 test("general key alerts include only 2026 and 2027 while wishlist drops keep all years", async () => {
   const t = testDatabase();
+  await enrollPrivateUsers(t.db,["9"],0,true);
   try {
     const keys = new KeysRepository(t.db), wishlist = new WishlistRepository(t.db);
     for (const [id, year] of [["recent", 2026], ["next", 2027], ["old", 2025], ["future", 2028], ["unknown", null]] as const) {
       await wishlist.addWishlist("user", null, { ...game, id }, null, 1);
       await keys.map(id, id, 620, 1, year);
-      await keys.observe(id, { ...price, keyCents: 1500 }, 3000, 1, true, ["channel"]);
-      await keys.observe(id, price, 3000, 2, false, ["channel"]);
+      await keys.observe(id, { ...price, keyCents: 1500 }, 3000, 1, true, ["9"]);
+      await keys.observe(id, price, 3000, 2, false, ["9"]);
     }
     const alerts = t.sqlite.prepare("SELECT source,game_id FROM deliveries WHERE status='pending' ORDER BY game_id").all();
     assert.deepEqual(alerts.filter(r => r.source === "keydeal").map(r => r.game_id), ["next", "recent"]);
@@ -57,10 +59,11 @@ test("general key alerts include only 2026 and 2027 while wishlist drops keep al
 test("pending general key alerts expire when release metadata changes or becomes unknown", async () => {
   for (const year of [2025, 2028, null]) {
     const t = testDatabase();
+    await enrollPrivateUsers(t.db,["9"],0,true);
     try {
       const keys = new KeysRepository(t.db), deliveries = new DeliveriesRepository(t.db);
       await keys.map(game.id, game.title, 620, 1, 2026);
-      await keys.observe(game.id, price, 3000, 1, false, ["channel"]);
+      await keys.observe(game.id, price, 3000, 1, false, ["9"]);
       assert.equal((await deliveries.pendingDeliveries(1)).length, 1);
       await keys.map(game.id, game.title, 620, 2, year);
       await deliveries.cancelInvalidPending(2);
@@ -74,6 +77,7 @@ test("pending general key alerts expire when release metadata changes or becomes
 test("delivery revalidation refreshes release metadata and rejects excluded years", async () => {
   for (const [year, want] of [[2026, true], [2027, true], [2025, false], [2028, false], [null, false]] as const) {
     const t = testDatabase();
+    await enrollPrivateUsers(t.db,["9"],0,true);
     try {
       const c = createContext(
         {
@@ -83,13 +87,13 @@ test("delivery revalidation refreshes release metadata and rejects excluded year
           ITAD_API_KEY: "fixture",
           TELEGRAM_BOT_TOKEN: "fixture",
           TELEGRAM_WEBHOOK_SECRET: "fixture",
-          TELEGRAM_CHAT_ID: "channel",
+          TELEGRAM_CHAT_ID: "9",
           WORK_QUEUE: { sendBatch: async () => {} } as any,
         },
         { recordTiming: () => {} },
       );
       await c.keys.map(game.id, game.title, 620, 1, 2026);
-      await c.keys.observe(game.id, price, 3000, 1, false, ["channel"]);
+      await c.keys.observe(game.id, price, 3000, 1, false, ["9"]);
       const d = (await c.deliveries.claimDelivery((await c.deliveries.pendingDeliveries(1))[0], 1))!;
       c.itad.getGameInfo = async () => ({ ...game, steamAppId: 620, releaseYear: year });
       c.gg.getPrices = async () => new Map([[620, price]]);
@@ -104,6 +108,7 @@ test("delivery revalidation refreshes release metadata and rejects excluded year
 // An old Worker can write a fresh mapping between the schema migration and deploy.
 test("a fresh legacy mapping still loads release metadata on the first new scan", async () => {
   const t = testDatabase();
+  await enrollPrivateUsers(t.db,["9"],0,true);
   try {
     const jobs: any[] = [];
     const c = createContext(
@@ -115,7 +120,7 @@ test("a fresh legacy mapping still loads release metadata on the first new scan"
         ITAD_API_KEY: "fixture",
         TELEGRAM_BOT_TOKEN: "fixture",
         TELEGRAM_WEBHOOK_SECRET: "fixture",
-        TELEGRAM_CHAT_ID: "channel",
+        TELEGRAM_CHAT_ID: "9",
         WORK_QUEUE: {
           sendBatch: async (items: any[]) => {
             jobs.push(...items.map(x => x.body));

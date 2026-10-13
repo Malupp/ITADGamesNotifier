@@ -9,7 +9,12 @@ for (const feed of NEWS_FEEDS) {
       counts[article.topic] = (counts[article.topic] ?? 0) + 1;
     console.log(
       feed.name,
-      JSON.stringify({ articles: result.articles.length, topics: counts }),
+      JSON.stringify({
+        articles: result.articles.length,
+        topics: counts,
+        withSummary: result.articles.filter((x) => x.summary).length,
+        withImage: result.articles.filter((x) => x.imageUrl).length,
+      }),
     );
   } catch {
     console.log(feed.name, "non disponibile o non valido");

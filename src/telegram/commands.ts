@@ -1,3 +1,4 @@
+import { showNotifications } from "./notifications.js";
 import type { BotSession } from "./session.js";
 import { handleNews } from "./news.js";
 import type { Preferences } from "../domain/models.js";
@@ -37,10 +38,16 @@ export async function handleCommand(session: BotSession): Promise<void> {
   const match = /^\/([a-z_]+)(?:@[\w]+)?(?:\s+(.*))?$/is.exec(
     message?.text?.trim() ?? "",
   );
+  if (!isPrivate || message?.sender_chat) return;
   if (!match) return;
   const command = match[1].toLowerCase(),
     args = match[2]?.trim().split(/\s+/) ?? [];
   if (!COMMANDS.has(command)) return;
+  if (!(await context.preferences.registerPrivateUser(userId, session.receivedAt))) return;
+  if (command === "notifiche") {
+    await showNotifications(session);
+    return;
+  }
   if (command === "news") {
     await handleNews(session, args);
     return;

@@ -1,3 +1,4 @@
+import { enrollPrivateUsers } from "../helpers/notifications.js";
 import test from "node:test";
 import assert from "node:assert/strict";
 import { testDatabase } from "../helpers/sqlite.js";
@@ -14,44 +15,46 @@ const article = (id: string, at = now + 1000): NewsArticle => ({
   url: "https://multiplayer.it/" + id,
   publishedAt: at,
 });
-test("group toggles have defaults, cap, generations, update and callback replay protection", async (t) => {
+test("private toggles have defaults, cap, generations, update and callback replay protection", async (t) => {
   const d = testDatabase();
   t.after(d.close);
+  await enrollPrivateUsers(d.db,Array.from({length:20},(_,i)=>String(i+1)),now);
   const r = new NewsRepository(d.db);
-  assert.equal((await r.group("-1")).enabled, 0);
-  assert.equal(await r.setEnabled("-1", "supergroup", true, now, 10), "ok");
+  assert.equal((await r.subscriber("1")).enabled, 0);
+  assert.equal(await r.setEnabled("1", "private", true, now, 10), "ok");
   assert.equal(
-    await r.setEnabled("-1", "supergroup", false, now + 1, 11),
+    await r.setEnabled("1", "private", false, now + 1, 11),
     "ok",
   );
   assert.equal(
-    await r.setEnabled("-1", "supergroup", true, now + 2, 10),
+    await r.setEnabled("1", "private", true, now + 2, 10),
     "stale",
   );
   assert.equal(
-    await r.setEnabled("-1", "supergroup", true, now + 2, 12, 1),
+    await r.setEnabled("1", "private", true, now + 2, 12, 1),
     "stale",
   );
-  assert.equal((await r.group("-1")).enabled, 0);
+  assert.equal((await r.subscriber("1")).enabled, 0);
   for (let i = 0; i < 10; i++)
     assert.equal(
-      await r.setEnabled("-" + (i + 2), "group", true, now, i + 20),
+      await r.setEnabled("" + (i + 2), "private", true, now, i + 20),
       "ok",
     );
-  assert.equal(await r.setEnabled("-20", "group", true, now, 100), "capacity");
-  assert.equal((await r.activeGroups()).length, 10);
+  assert.equal(await r.setEnabled("20", "private", true, now, 100), "capacity");
+  assert.equal((await r.activeSubscribers()).length, 10);
 });
 test("silent feed seed, activation boundary, TTL, off invalidation and new generation", async (t) => {
   const d = testDatabase();
   t.after(d.close);
+  await enrollPrivateUsers(d.db,Array.from({length:20},(_,i)=>String(i+1)),now);
   const r = new NewsRepository(d.db);
-  await r.setEnabled("-1", "group", true, now, 1);
+  await r.setEnabled("1", "private", true, now, 1);
   await r.ingest(
     "feed",
     { articles: [article("seed")], notModified: false },
     now,
   );
-  await r.queueForGroups(now + 2000);
+  await r.queueForSubscribers(now + 2000);
   assert.equal((await r.dispatch(now + 2000)).length, 0);
   await r.ingest(
     "feed",
@@ -65,11 +68,11 @@ test("silent feed seed, activation boundary, TTL, off invalidation and new gener
     },
     now + 2000,
   );
-  await r.queueForGroups(now + 2000);
+  await r.queueForSubscribers(now + 2000);
   const [id] = await r.dispatch(now + 2000);
   assert.ok(id);
   assert.equal((await r.claimDelivery(id, now + 2000))?.article_id, "new");
-  await r.setEnabled("-1", "group", false, now + 3000, 2);
+  await r.setEnabled("1", "private", false, now + 3000, 2);
   assert.equal(
     await r.reserveAttempt(
       id,
@@ -78,16 +81,17 @@ test("silent feed seed, activation boundary, TTL, off invalidation and new gener
     ),
     false,
   );
-  await r.setEnabled("-1", "group", true, now + 4000, 3);
-  await r.queueForGroups(now + 5000);
+  await r.setEnabled("1", "private", true, now + 4000, 3);
+  await r.queueForSubscribers(now + 5000);
   assert.deepEqual(await r.dispatch(now + 5000), []);
 });
-test("atomic rolling budget includes retries and isolated groups; stale lease cannot finish", async (t) => {
+test("atomic rolling budget includes retries and isolated subscribers; stale lease cannot finish", async (t) => {
   const d = testDatabase();
   t.after(d.close);
+  await enrollPrivateUsers(d.db,Array.from({length:20},(_,i)=>String(i+1)),now);
   const r = new NewsRepository(d.db);
-  await r.setEnabled("-1", "group", true, now, 1);
-  await r.setEnabled("-2", "group", true, now, 2);
+  await r.setEnabled("1", "private", true, now, 1);
+  await r.setEnabled("2", "private", true, now, 2);
   await r.ingest("feed", { articles: [], notModified: false }, now);
   await r.ingest(
     "feed",
@@ -97,11 +101,11 @@ test("atomic rolling budget includes retries and isolated groups; stale lease ca
     },
     now + 2000,
   );
-  await r.queueForGroups(now + 2000);
+  await r.queueForSubscribers(now + 2000);
   const ids = await r.dispatch(now + 2000);
   const rows = (
     await Promise.all(ids.map((x) => r.claimDelivery(x, now + 2000)))
-  ).filter((x) => x?.chat_id === "-1");
+  ).filter((x) => x?.chat_id === "1");
   assert.equal(rows.length, 3);
   assert.deepEqual(
     await Promise.all(
@@ -134,6 +138,7 @@ test("atomic rolling budget includes retries and isolated groups; stale lease ca
 test("durable feed jobs dedup cycles, recover dispatch and leases; failed feed does not block selection", async (t) => {
   const d = testDatabase();
   t.after(d.close);
+  await enrollPrivateUsers(d.db,Array.from({length:20},(_,i)=>String(i+1)),now);
   const jobs = new NewsJobs(d.db);
   await jobs.startCycle(["a", "b"], now);
   await jobs.startCycle(["a", "b"], now);
@@ -160,9 +165,10 @@ test("durable feed jobs dedup cycles, recover dispatch and leases; failed feed d
 test("an older settled cycle cannot select articles from an unsettled newer cycle", async (t) => {
   const d = testDatabase();
   t.after(d.close);
+  await enrollPrivateUsers(d.db,Array.from({length:20},(_,i)=>String(i+1)),now);
   const r = new NewsRepository(d.db),
     jobs = new NewsJobs(d.db);
-  await r.setEnabled("-1", "group", true, now, 1);
+  await r.setEnabled("1", "private", true, now, 1);
   await r.ingest("a", { articles: [], notModified: false }, now);
   const later = Math.floor(now / 1800000) * 1800000 + 1800000;
   await jobs.startCycle(["a", "b"], later);
@@ -175,13 +181,13 @@ test("an older settled cycle cannot select articles from an unsettled newer cycl
     a,
   );
   await jobs.complete(a.id, a.lease_token!, later + 2000);
-  await r.queueForGroups(later + 2000);
+  await r.queueForSubscribers(later + 2000);
   assert.deepEqual(await r.dispatch(later + 2000), []);
   const b = (await jobs.claim(
     ids.find((x) => x.startsWith("b:"))!,
     later + 2000,
   ))!;
   await jobs.complete(b.id, b.lease_token!, later + 2000);
-  await r.queueForGroups(later + 2000);
+  await r.queueForSubscribers(later + 2000);
   assert.equal((await r.dispatch(later + 2000)).length, 1);
 });

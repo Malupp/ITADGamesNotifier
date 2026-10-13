@@ -1,3 +1,4 @@
+import { handleRecentCallback } from "./notifications.js";
 import type { BotSession } from "./session.js";
 import { handleNewsCallback } from "./news.js";
 import type { PriceQuote } from "../domain/models.js";
@@ -27,7 +28,12 @@ export async function handleCallback(session: BotSession): Promise<void> {
     showPrices,
     wishlistPage,
   } = session;
-  if (!callback) return;
+  if (!callback || !isPrivate) return;
+  if (!(await context.preferences.registerPrivateUser(userId, session.receivedAt))) return;
+  if (callback.data?.startsWith("recent|")) {
+    await handleRecentCallback(session);
+    return;
+  }
   if (callback.data?.startsWith("news|")) {
     await handleNewsCallback(session);
     return;

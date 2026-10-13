@@ -48,6 +48,31 @@ export class TelegramClient {
     }
     return {isGroup:true,botCanSend,userIsAdmin,chatType:chat.type as 'group'|'supergroup'};
   }
+  async getChatType(chatId: string): Promise<"private" | "channel" | "group" | "supergroup"> {
+    const chat = await this.call("getChat", { chat_id: chatId });
+    const matches = String(chat?.id) === chatId ||
+      (/^@[a-z0-9_]+$/i.test(chatId) && typeof chat?.username === "string" &&
+        chat.username.toLowerCase() === chatId.slice(1).toLowerCase());
+    if (!Number.isSafeInteger(chat?.id) || !matches ||
+      !["private", "channel", "group", "supergroup"].includes(chat?.type)) throw new ApiError(502);
+    return chat.type;
+  }
+  async sendPhoto(chatId: string,caption: string,photo: string): Promise<void> {
+    await this.call("sendPhoto", { chat_id: chatId, photo, caption, parse_mode: "HTML" });
+  }
+  async sendIllustrated(
+    chatId: string, text: string, photo?: string | null, previewUrl?: string,
+  ): Promise<void> {
+    if (photo) {
+      try {
+        await this.sendPhoto(chatId, text, photo);
+        return;
+      } catch (error) {
+        if (!(error instanceof ApiError) || error.status !== 400) throw error;
+      }
+    }
+    await this.sendMessage(chatId, text, undefined, previewUrl);
+  }
   async sendMessage(
     chatId: string,
     text: string,

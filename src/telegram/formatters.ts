@@ -22,11 +22,14 @@ export function money(cents: number): string {
 
 export function formatGiveaway(offer: Offer): string {
   return (
-    `🎮 <b>${escapeHtml(offer.title)}</b>\n🏪 ${escapeHtml(offer.shop)}\n💰 <b>GRATIS da riscattare</b>` +
+    `🎁 <b>Gioco gratis da tenere</b>\n\n🎮 <b>${escapeHtml(offer.title.slice(0,200))}</b>` +
+    (offer.description ? `\n\n${escapeHtml(offer.description.slice(0,420))}` : "") +
+    (offer.genres ? `\n\n🎯 ${escapeHtml(offer.genres.slice(0,100))}` : "") +
+    `\n\n🏪 ${escapeHtml(offer.shop.slice(0,60))}\n💰 <b>GRATIS da riscattare</b>` +
     (offer.expiry === null
       ? ""
       : `\n⏳ Scade il ${formatExpiry(offer.expiry)} (Italia)`) +
-    `\n🔗 <a href="${escapeHtml(offer.url)}">Riscatta il gioco</a>`
+    `\n\n🔗 <a href="${escapeHtml(offer.url)}">Riscatta il gioco</a>`
   );
 }
 export function formatPrice(title: string, quote: PriceQuote): string {
@@ -49,4 +52,18 @@ export function quoteText(quote: PriceQuote): string {
       ? ""
       : `\n⏳ Scade il ${formatExpiry(quote.expiry)} (Italia)`)
   );
+}
+
+import type { NewsArticle } from "../domain/news.js";
+export function formatNews(article: NewsArticle): string {
+  const label={games:"🎮 Videogiochi",cinema:"🎬 Cinema",anime_manga:"🌸 Anime e manga"}[article.topic];
+  return `📰 ${label}
+
+<b>${html(article.title,200)}</b>${article.summary?`
+
+${html(article.summary,420)}`:""}
+
+🗞 ${html(article.sourceName,80)} · ${formatExpiry(article.publishedAt)} (Italia)
+
+<a href="${html(article.url,2048)}">Leggi la notizia</a>`;
 }

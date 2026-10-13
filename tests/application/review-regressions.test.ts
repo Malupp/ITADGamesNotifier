@@ -55,7 +55,7 @@ function setup() {
     ITAD_API_KEY: "fixture",
     TELEGRAM_BOT_TOKEN: "fixture",
     TELEGRAM_WEBHOOK_SECRET: "fixture",
-    TELEGRAM_CHAT_ID: "1",
+    TELEGRAM_CHAT_ID: "-100",
   } as unknown as Env;
   return { ...t, env, jobs, store: new Store(t.db), scans: new Scans(t.db) };
 }
@@ -157,7 +157,7 @@ test("giveaway delivery discards a campaign whose Italian store price is now pai
           expiry: now + 3600000,
         },
       ],
-      ["1"],
+      ["-100"],
       now,
       false,
     );
@@ -166,6 +166,7 @@ test("giveaway delivery discards a campaign whose Italian store price is now pai
     const fetcher: typeof fetch = async (input, init) => {
       const url = new URL(String(input));
       if (url.hostname === "api.telegram.org") {
+        if(url.pathname.endsWith("/getChat")) return json({ok:true,result:{id:-100,type:"channel"}});
         sent.push(JSON.parse(String(init?.body)).text);
         return json({ ok: true, result: {} });
       }

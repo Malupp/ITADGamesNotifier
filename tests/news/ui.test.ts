@@ -8,7 +8,7 @@ import { handleCallback } from "../../src/telegram/callbacks.js";
 import { processUpdate } from "../../src/application/update.js";
 import type { Env } from "../../src/runtime/bindings.js";
 function fixture(
-  type = "supergroup",
+  type = "private",
   role = "administrator",
   botRole = "administrator",
   broken = false,
@@ -49,7 +49,7 @@ function fixture(
   const session = (
     id: number,
     text = "/news on",
-    chat = -1,
+    chat = 1,
     user = 1,
     data?: string,
   ) =>
@@ -88,31 +88,19 @@ function fixture(
     },
   };
 }
-test("admin and owner can change one group toggle; members cannot; groups remain isolated", async (t) => {
-  for (const role of ["administrator", "creator", "member"]) {
-    const f = fixture("supergroup", role);
-    t.after(f.d.close);
-    await handleCommand(f.session(1));
-    assert.equal(
-      (await f.c.news.group("-1")).enabled,
-      role === "member" ? 0 : 1,
-    );
-    assert.equal((await f.c.news.group("-2")).enabled, 0);
-  }
+test("private users control their own news without Telegram admin permission checks", async (t) => {
+  const f=fixture();t.after(f.d.close);
+  await handleCommand(f.session(1));
+  assert.equal((await f.c.news.subscriber("1")).enabled,1);
+  assert.equal((await f.c.news.subscriber("2")).enabled,0);
+  assert.deepEqual(f.methods,[]);
 });
-test("private, channels, anonymous sender and unavailable/demoted bot cannot enable news", async (t) => {
-  for (const [type, role, bot, broken, user, chat] of [
-    ["private", "administrator", "administrator", false, 1, 1],
-    ["channel", "administrator", "administrator", false, 1, -1],
-    ["group", "member", "administrator", false, 1087968824, -1],
-    ["group", "administrator", "member", false, 1, -1],
-    ["group", "administrator", "left", false, 1, -1],
-    ["group", "administrator", "administrator", true, 1, -1],
-  ] as const) {
-    const f = fixture(type, role, bot, broken);
-    t.after(f.d.close);
-    await handleCommand(f.session(1, "/news on", chat, user));
-    assert.equal((await f.c.news.group(String(chat))).enabled, 0);
+test("groups, channels and malformed private identities cannot activate news", async (t) => {
+  for(const [type,user,chat] of [["group",1,-1],["supergroup",1,-1],["channel",1,-1],["private",1,2]] as const) {
+    const f=fixture(type);t.after(f.d.close);
+    await handleCommand(f.session(1,"/news on",chat,user));
+    assert.equal((await f.c.news.activeSubscribers()).length,0);
+    assert.equal(f.d.sqlite.prepare("SELECT count(*) AS n FROM deliveries").get()!.n,0);
   }
 });
 test("toggle callback generations and command update IDs prevent stale reactivation", async (t) => {
@@ -121,12 +109,12 @@ test("toggle callback generations and command update IDs prevent stale reactivat
   await handleCommand(f.session(10));
   await handleCommand(f.session(12, "/news off"));
   await handleCommand(f.session(11));
-  await handleCallback(f.session(13, "", -1, 1, "news|on|1"));
-  assert.equal((await f.c.news.group("-1")).enabled, 0);
-  await handleCallback(f.session(14, "", -1, 1, "news|on|2"));
-  assert.equal((await f.c.news.group("-1")).enabled, 1);
+  await handleCallback(f.session(13, "", 1, 1, "news|on|1"));
+  assert.equal((await f.c.news.subscriber("1")).enabled, 0);
+  await handleCallback(f.session(14, "", 1, 1, "news|on|2"));
+  assert.equal((await f.c.news.subscriber("1")).enabled, 1);
   await handleCommand(f.session(15, "/news"));
-  assert.ok(f.methods.includes("getChatMember"));
+  assert.ok(!f.methods.includes("getChatMember"));
 });
 test("anonymous sender_chat cannot mutate preferences even if a synthetic from matches an administrator", async (t) => {
   const f = fixture();
@@ -134,15 +122,15 @@ test("anonymous sender_chat cannot mutate preferences even if a synthetic from m
   const session = f.session(1);
   (session.message as any).sender_chat = { id: -1 };
   await handleCommand(session);
-  assert.equal((await f.c.news.group("-1")).enabled, 0);
+  assert.equal((await f.c.news.subscriber("1")).enabled, 0);
 });
 test("explicit off invalidates an older activation button even while already off", async (t) => {
   const f = fixture();
   t.after(f.d.close);
   await handleCommand(f.session(9, "/news"));
   await handleCommand(f.session(10, "/news off"));
-  await handleCallback(f.session(11, "", -1, 1, "news|on|0"));
-  assert.equal((await f.c.news.group("-1")).enabled, 0);
+  await handleCallback(f.session(11, "", 1, 1, "news|on|0"));
+  assert.equal((await f.c.news.subscriber("1")).enabled, 0);
 });
 test("fresh lower update IDs after eight days work; old receipt and callback cannot undo shutdown", async (t) => {
   const f = fixture();
@@ -151,12 +139,12 @@ test("fresh lower update IDs after eight days work; old receipt and callback can
   const delayed = f.session(900001);
   f.time += 8 * 86400000;
   await handleCommand(f.session(10000, "/news off"));
-  assert.equal((await f.c.news.group("-1")).enabled, 0);
+  assert.equal((await f.c.news.subscriber("1")).enabled, 0);
   await handleCommand(delayed);
-  await handleCallback(f.session(10001, "", -1, 1, "news|on|1"));
-  assert.equal((await f.c.news.group("-1")).enabled, 0);
-  await handleCallback(f.session(10002, "", -1, 1, "news|on|2"));
-  assert.equal((await f.c.news.group("-1")).enabled, 1);
+  await handleCallback(f.session(10001, "", 1, 1, "news|on|1"));
+  assert.equal((await f.c.news.subscriber("1")).enabled, 0);
+  await handleCallback(f.session(10002, "", 1, 1, "news|on|2"));
+  assert.equal((await f.c.news.subscriber("1")).enabled, 1);
 });
 test("durable update receipt survives queue delay across an ID reset", async (t) => {
   const f = fixture();
@@ -168,7 +156,7 @@ test("durable update receipt survives queue delay across an ID reset", async (t)
   const off = f.session(10000, "/news off");
   await f.c.updates.acceptUpdate(off.update, f.time);
   await processUpdate(10000, f.c, f.time);
-  assert.equal((await f.c.news.group("-1")).enabled, 0);
+  assert.equal((await f.c.news.subscriber("1")).enabled, 0);
   await processUpdate(900001, f.c, f.time);
-  assert.equal((await f.c.news.group("-1")).enabled, 0);
+  assert.equal((await f.c.news.subscriber("1")).enabled, 0);
 });

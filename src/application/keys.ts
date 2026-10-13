@@ -14,13 +14,7 @@ import { flushDeliveries, sendJobs } from "../runtime/queues.js";
 
 export const keysEnabled = (c: ApplicationContext) =>
   c.env.KEYSHOPS_ENABLED === "true" && Boolean(c.env.GGDEALS_API_KEY);
-const targets = (c: ApplicationContext) => [
-  ...new Set(
-    [c.env.TELEGRAM_CHAT_ID, c.env.TELEGRAM_CHAT_GROUP].filter(
-      (s): s is string => Boolean(s),
-    ),
-  ),
-];
+const targets = (c: ApplicationContext) => c.preferences.recentDealTargets();
 export async function ggPrices(
   c: ApplicationContext,
   ids: number[],
@@ -177,7 +171,7 @@ export async function processKeyScan(
         }),
         now,
         task.quiet,
-        targets(c),
+        await targets(c),
       );
       next =
         task.offset + 20 < task.ids.length
@@ -325,7 +319,7 @@ export async function revalidateKeyDelivery(
     retail,
     now,
     true,
-    targets(c),
+    await targets(c),
     true,
   );
   if (
@@ -361,7 +355,7 @@ export async function revalidateKeyDelivery(
       return null;
     p.title = item.title;
   } else if (
-    !targets(c).includes(d.chat_id) ||
+    !(await c.preferences.canNotifyRecent(d.chat_id, d.price_generation ?? null)) ||
     !isSpecialKeyDeal(p.keyCents, regular, retail) ||
     !(
       keyDrop(state.notified ?? state.baseline, p.keyCents, 10) ||

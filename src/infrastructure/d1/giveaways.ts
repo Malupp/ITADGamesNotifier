@@ -23,7 +23,7 @@ export class GiveawaysRepository {
   async getGiveaways(now = Date.now(), limit = 10): Promise<Offer[]> {
     const rows = await this.db
       .prepare(
-        `SELECT offer_id AS id,game_id AS gameId,slug,title,shop,url,expires_at AS expiry
+        `SELECT offer_id AS id,game_id AS gameId,slug,title,shop,url,expires_at AS expiry,description,image_url AS imageUrl,genres
       FROM giveaways WHERE (expires_at IS NULL OR expires_at>?) ORDER BY discovered_at DESC,offer_id LIMIT ?`,
       )
       .bind(now, limit)
@@ -58,11 +58,11 @@ export class GiveawaysRepository {
     statements.push(
       this.db
         .prepare(
-          `INSERT INTO giveaways(offer_id,game_id,slug,title,shop,url,expires_at,discovered_at,last_seen_at)
+          `INSERT INTO giveaways(offer_id,game_id,slug,title,shop,url,expires_at,discovered_at,last_seen_at,description,image_url,genres)
       SELECT json_extract(value,'$.id'),json_extract(value,'$.gameId'),json_extract(value,'$.slug'),
-        json_extract(value,'$.title'),json_extract(value,'$.shop'),json_extract(value,'$.url'),json_extract(value,'$.expiry'),?,?
+        json_extract(value,'$.title'),json_extract(value,'$.shop'),json_extract(value,'$.url'),json_extract(value,'$.expiry'),?,?,json_extract(value,'$.description'),json_extract(value,'$.imageUrl'),json_extract(value,'$.genres')
       FROM json_each(?) WHERE 1 ON CONFLICT(offer_id) DO UPDATE SET last_seen_at=excluded.last_seen_at,
-        expires_at=excluded.expires_at,url=excluded.url`,
+        expires_at=excluded.expires_at,url=excluded.url,description=excluded.description,image_url=excluded.image_url,genres=excluded.genres`,
         )
         .bind(now, now, data),
     );

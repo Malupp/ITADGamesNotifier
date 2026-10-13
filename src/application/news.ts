@@ -3,7 +3,7 @@ import { NEWS_FEEDS } from "../infrastructure/news/sources.js";
 import { NEWS_TTL } from "../domain/news.js";
 import { ApiError } from "../infrastructure/http.js";
 import { sendJobs } from "../runtime/queues.js";
-import { html } from "../telegram/options.js";
+import { formatNews } from "../telegram/formatters.js";
 export function newsEnabled(c: ApplicationContext) {
   return c.env.NEWS_ENABLED === "true" && c.env.SCANS_ENABLED !== "false";
 }
@@ -32,7 +32,7 @@ export async function publishNews(c: ApplicationContext, now: number) {
 }
 export async function scheduleNews(c: ApplicationContext, now: number) {
   if (!newsEnabled(c)) return;
-  if ((await c.news.activeGroups()).length)
+  if ((await c.news.activeSubscribers()).length)
     await c.newsJobs.startCycle(
       NEWS_FEEDS.map((x) => x.id),
       now,
@@ -54,7 +54,7 @@ export async function processNewsFeed(
   let delay: number | null = null;
   if (
     source &&
-    (await c.news.activeGroups()).length &&
+    (await c.news.activeSubscribers()).length &&
     (!state || state.last_cycle < job.cycle_at)
   ) {
     let result;
@@ -80,7 +80,7 @@ export async function processNewsFeed(
     }
   } else await c.newsJobs.complete(id, token, now);
   if (await c.newsJobs.cycleSettled(job.cycle_at))
-    await c.news.queueForGroups(Math.max(now, c.now()));
+    await c.news.queueForSubscribers(Math.max(now, c.now()));
   await publishNews(c, Math.max(now, c.now()));
   return delay;
 }
@@ -94,37 +94,31 @@ export async function processNewsDelivery(
   if (!delivery) return null;
   const token = delivery.lease_token!;
   const article = await c.news.article(delivery.article_id);
-  const group = await c.news.group(delivery.chat_id);
+  const subscriber = await c.news.subscriber(delivery.chat_id);
   const valid = (at: number) =>
-    group.enabled === 1 &&
-    group.generation === delivery.generation &&
+    subscriber.enabled === 1 &&
+    subscriber.generation === delivery.generation &&
     article !== null &&
-    article.publishedAt > group.activated_at &&
+    article.publishedAt > subscriber.activated_at &&
     article.publishedAt > at - NEWS_TTL &&
     article.publishedAt <= at;
-  if (!valid(now)) {
+  if (!valid(now) || !(await c.preferences.isAvailable(delivery.chat_id))) {
     await c.news.finishDelivery(id, token, "expired", now);
     return null;
   }
+  const activity = await c.preferences.privateActivity(delivery.chat_id);
+  let attemptedAt = now;
   try {
-    const access = await c.telegram.getGroupAccess(delivery.chat_id);
-    if (!access.isGroup || !access.botCanSend) {
-      await c.news.disable(
-        delivery.chat_id,
-        Math.max(now, c.now()),
-        delivery.generation,
-      );
-      return null;
-    }
     const at = Math.max(now, c.now());
     if (!newsEnabled(c)) {
       await c.news.retryDelivery(id, token, at + 60000);
       return null;
     }
     if (!(await c.news.reserveAttempt(id, token, at))) {
-      const latest = await c.news.group(delivery.chat_id);
+      const latest = await c.news.subscriber(delivery.chat_id);
       if (
         !latest.enabled ||
+        !(await c.preferences.isAvailable(delivery.chat_id)) ||
         latest.generation !== delivery.generation ||
         !valid(at)
       ) {
@@ -135,23 +129,22 @@ export async function processNewsDelivery(
       await c.news.retryDelivery(id, token, due);
       return Math.max(1, Math.ceil((due - at) / 1000));
     }
-    const label = {
-      games: "🎮 Videogiochi",
-      cinema: "🎬 Cinema",
-      anime_manga: "🌸 Anime e manga",
-    }[article!.topic];
-    await c.telegram.sendMessage(
-      delivery.chat_id,
-      `${label}\n<b>${html(article!.title, 300)}</b>\n${html(article!.sourceName, 80)}\n<a href="${html(article!.url, 4000)}">Leggi la notizia</a>`,
-    );
+    attemptedAt = at;
+    if (article!.imageUrl && !delivery.media_failed)
+      await c.telegram.sendPhoto(delivery.chat_id, formatNews(article!), article!.imageUrl);
+    else
+      await c.telegram.sendMessage(delivery.chat_id, formatNews(article!), undefined, article!.url);
     await c.news.finishDelivery(id, token, "sent", Math.max(now, c.now()));
     return null;
   } catch (error) {
+    if (error instanceof ApiError && error.status === 400 && article!.imageUrl && !delivery.media_failed) {
+      await c.news.retryDelivery(id, token, Math.max(now, c.now()) + 1000, true);
+      return 1;
+    }
     if (error instanceof ApiError && error.permanent) {
-      await c.news.disable(
-        delivery.chat_id,
-        Math.max(now, c.now()),
-        delivery.generation,
+      await c.news.failDelivery(
+        delivery, token, subscriber.revision, activity,
+        Math.max(now, c.now()), error.status === 403, attemptedAt,
       );
       return null;
     }

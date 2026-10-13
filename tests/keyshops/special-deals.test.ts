@@ -1,3 +1,4 @@
+import { enrollPrivateUsers } from "../helpers/notifications.js";
 import test from "node:test";
 import assert from "node:assert/strict";
 import { isSpecialKeyDeal, bestRegular } from "../../src/domain/key-pricing.js";
@@ -52,6 +53,7 @@ test("special deals require list strictly above30 EUR, at least50% cut and a che
 test("only qualifying2026/2027 general alerts are queued and outbox invalidates a changed list", async (t) => {
   const d = testDatabase();
   t.after(d.close);
+  await enrollPrivateUsers(d.db,["9"],0,true);
   const keys = new KeysRepository(d.db),
     out = new DeliveriesRepository(d.db);
   for (const [id, year, regular, key] of [
@@ -69,7 +71,7 @@ test("only qualifying2026/2027 general alerts are queued and outbox invalidates 
       4000,
       1,
       false,
-      ["group"],
+      ["9"],
     );
   }
   assert.deepEqual(
@@ -110,6 +112,7 @@ test("delivery fetches official list again and refuses missing, cheap, or insuff
   ] as const) {
     const d = testDatabase();
     t.after(d.close);
+    await enrollPrivateUsers(d.db,["9"],0,true);
     const c = createContext(
       {
         DB: d.db,
@@ -118,13 +121,13 @@ test("delivery fetches official list again and refuses missing, cheap, or insuff
         ITAD_API_KEY: "fixture",
         TELEGRAM_BOT_TOKEN: "fixture",
         TELEGRAM_WEBHOOK_SECRET: "fixture",
-        TELEGRAM_CHAT_ID: "group",
+        TELEGRAM_CHAT_ID: "9",
         WORK_QUEUE: {} as any,
       },
       { recordTiming: () => {} },
     );
     await c.keys.map("g", "Gioco", 620, 1, 2026);
-    await c.keys.observe("g", p, 4000, 2, false, ["group"]);
+    await c.keys.observe("g", p, 4000, 2, false, ["9"]);
     const [id] = await c.deliveries.pendingDeliveries(2);
     assert.ok(id);
     const delivery = (await c.deliveries.claimDelivery(id, 2))!;
@@ -156,6 +159,7 @@ test("delivery fetches official list again and refuses missing, cheap, or insuff
 test("official price refresh preserves the valid list rather than deleting it", async (t) => {
   const d = testDatabase();
   t.after(d.close);
+  await enrollPrivateUsers(d.db,["9"],0,true);
   const keys = new KeysRepository(d.db);
   await keys.map("g", "Gioco", 620, 1, 2026);
   await keys.observe("g", p, 4000, 1, true, []);

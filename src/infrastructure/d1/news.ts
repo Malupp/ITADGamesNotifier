@@ -6,9 +6,9 @@ import {
 } from "../../domain/news.js";
 import type { FeedResult } from "../news/client.js";
 import { NEWS_LEASE, type NewsJob } from "./news-jobs.js";
-export interface NewsGroup {
+export interface NewsSubscriber {
   chat_id: string;
-  chat_type: "group" | "supergroup";
+  chat_type: "private";
   enabled: number;
   activated_at: number;
   generation: number;
@@ -28,6 +28,7 @@ export interface NewsDelivery {
   lease_token: string | null;
   lease_until: number | null;
   attempts: number;
+  media_failed: number;
 }
 export interface NewsFeedState {
   id: string;
@@ -38,14 +39,14 @@ export interface NewsFeedState {
 }
 export class NewsRepository {
   constructor(private db: D1Database) {}
-  async group(chatId: string): Promise<NewsGroup> {
+  async subscriber(chatId: string): Promise<NewsSubscriber> {
     return (
       (await this.db
-        .prepare("SELECT * FROM news_groups WHERE chat_id=?")
+        .prepare("SELECT * FROM news_subscribers WHERE chat_id=?")
         .bind(chatId)
-        .first<NewsGroup>()) ?? {
+        .first<NewsSubscriber>()) ?? {
         chat_id: chatId,
-        chat_type: "group",
+        chat_type: "private",
         enabled: 0,
         activated_at: 0,
         generation: 0,
@@ -59,26 +60,30 @@ export class NewsRepository {
   }
   async setEnabled(
     chatId: string,
-    type: "group" | "supergroup",
+    type: "private",
     on: boolean,
     now: number,
     updateId: number,
     expected?: number,
     receivedAt = now,
   ): Promise<"ok" | "stale" | "capacity"> {
+    if (type !== "private" || !/^[1-9]\d*$/.test(chatId)) return "stale";
+    if (!(await this.db.prepare("SELECT 1 FROM private_users WHERE user_id=?").bind(chatId).first())) return "stale";
     await this.db
       .prepare(
-        "INSERT OR IGNORE INTO news_groups(chat_id,chat_type,updated_at) VALUES(?,?,?)",
+        "INSERT OR IGNORE INTO news_subscribers(chat_id,chat_type,updated_at) VALUES(?,?,?)",
       )
       .bind(chatId, type, now)
       .run();
     const row = await this.db
       .prepare(
-        `UPDATE news_groups SET enabled=?,chat_type=?,generation=generation+CASE WHEN enabled!=? THEN 1 ELSE 0 END,
+        `UPDATE news_subscribers SET enabled=?,chat_type=?,generation=generation+CASE WHEN enabled!=? THEN 1 ELSE 0 END,
       activated_at=CASE WHEN enabled=0 AND ?=1 THEN ? ELSE activated_at END,last_update_id=?,updated_at=?,revision=revision+1,last_received_at=?
       WHERE chat_id=? AND ? >= last_received_at AND ? >= ?
       AND (last_update_id<? OR ?>last_received_at+604800000) AND (? IS NULL OR revision=?)
-      AND (?=0 OR enabled=1 OR (SELECT count(*) FROM news_groups WHERE enabled=1)<10) RETURNING *`,
+      AND (?=0 OR enabled=1 OR (SELECT count(*) FROM news_subscribers s WHERE s.enabled=1
+        AND EXISTS(SELECT 1 FROM private_users u WHERE u.user_id=s.chat_id)
+        AND NOT EXISTS(SELECT 1 FROM blocked_chats b WHERE b.chat_id=s.chat_id))<10) RETURNING *`,
       )
       .bind(
         Number(on),
@@ -99,14 +104,14 @@ export class NewsRepository {
         expected ?? null,
         Number(on),
       )
-      .first<NewsGroup>();
+      .first<NewsSubscriber>();
     if (!row) {
-      const group = await this.group(chatId);
-      return receivedAt < group.last_received_at ||
+      const subscriber = await this.subscriber(chatId);
+      return receivedAt < subscriber.last_received_at ||
         receivedAt < now - NEWS_TTL ||
-        (group.last_update_id >= updateId &&
-          receivedAt <= group.last_received_at + 7 * NEWS_TTL) ||
-        (expected !== undefined && group.revision !== expected)
+        (subscriber.last_update_id >= updateId &&
+          receivedAt <= subscriber.last_received_at + 7 * NEWS_TTL) ||
+        (expected !== undefined && subscriber.revision !== expected)
         ? "stale"
         : "capacity";
     }
@@ -123,7 +128,7 @@ export class NewsRepository {
     await this.db.batch([
       this.db
         .prepare(
-          "UPDATE news_groups SET enabled=0,generation=generation+1,revision=revision+1,updated_at=? WHERE chat_id=? AND generation=? AND enabled=1",
+          "UPDATE news_subscribers SET enabled=0,generation=generation+1,revision=revision+1,updated_at=? WHERE chat_id=? AND generation=? AND enabled=1",
         )
         .bind(now, chatId, generation),
       this.db
@@ -133,13 +138,42 @@ export class NewsRepository {
         .bind(chatId, generation),
     ]);
   }
-  async activeGroups() {
+  async failDelivery(
+    delivery: NewsDelivery, token: string, revision: number,
+    activity: number | null, now: number, blocked: boolean, attemptedAt = now,
+  ) {
+    const current = `EXISTS(SELECT 1 FROM news_deliveries d
+      JOIN news_subscribers s ON s.chat_id=d.chat_id
+      JOIN private_users u ON u.user_id=d.chat_id
+      WHERE d.id=? AND d.status='processing' AND d.lease_token=? AND d.lease_until>?
+      AND s.enabled=1 AND s.generation=d.generation AND s.revision=? AND u.activity_revision IS ?)`;
+    const guard = [delivery.id, token, now, revision, activity];
+    await this.db.batch([
+      this.db.prepare(`INSERT INTO blocked_chats(chat_id,blocked_at)
+        SELECT ?,? WHERE ?=1 AND ${current}
+        ON CONFLICT(chat_id) DO UPDATE SET blocked_at=MAX(blocked_chats.blocked_at,excluded.blocked_at)`)
+        .bind(delivery.chat_id, attemptedAt, Number(blocked), ...guard),
+      this.db.prepare(`UPDATE news_subscribers SET enabled=0,generation=generation+1,
+        revision=revision+1,updated_at=? WHERE chat_id=? AND ${current}`)
+        .bind(now, delivery.chat_id, ...guard),
+      this.db.prepare(`UPDATE news_deliveries SET status='expired',lease_token=NULL,lease_until=NULL
+        WHERE chat_id=? AND generation=? AND status IN ('pending','processing')
+        AND EXISTS(SELECT 1 FROM news_subscribers s JOIN private_users u ON u.user_id=s.chat_id
+          WHERE s.chat_id=? AND s.enabled=0 AND s.generation=? AND s.revision=? AND s.updated_at=?
+          AND u.activity_revision IS ?)`)
+        .bind(delivery.chat_id, delivery.generation, delivery.chat_id,
+          delivery.generation + 1, revision + 1, now, activity),
+    ]);
+    // A newer command/claim owns the subscription now. Retire only our own failed delivery.
+    await this.finishDelivery(delivery.id, token, "expired", now);
+  }
+  async activeSubscribers() {
     return (
       await this.db
         .prepare(
-          "SELECT * FROM news_groups WHERE enabled=1 ORDER BY chat_id LIMIT 10",
+          "SELECT * FROM news_subscribers WHERE enabled=1 AND EXISTS(SELECT 1 FROM private_users WHERE user_id=chat_id) AND NOT EXISTS(SELECT 1 FROM blocked_chats WHERE blocked_chats.chat_id=news_subscribers.chat_id) ORDER BY chat_id LIMIT 10",
         )
-        .all<NewsGroup>()
+        .all<NewsSubscriber>()
     ).results;
   }
   feed(id: string) {
@@ -158,10 +192,10 @@ export class NewsRepository {
     await this.db.batch([
       this.db
         .prepare(
-          `INSERT OR IGNORE INTO news_articles(id,publisher,source_name,topic,title,url,published_at,eligible,discovered_at,guid,cycle_at)
+          `INSERT OR IGNORE INTO news_articles(id,publisher,source_name,topic,title,url,published_at,eligible,discovered_at,guid,cycle_at,summary,image_url)
         SELECT json_extract(value,'$.id'),json_extract(value,'$.publisher'),json_extract(value,'$.sourceName'),json_extract(value,'$.topic'),
         json_extract(value,'$.title'),json_extract(value,'$.url'),json_extract(value,'$.publishedAt'),
-        COALESCE((SELECT seeded FROM news_feeds WHERE id=?),0),?,json_extract(value,'$.guid'),? FROM json_each(?) WHERE ${guard}`,
+        COALESCE((SELECT seeded FROM news_feeds WHERE id=?),0),?,json_extract(value,'$.guid'),?,json_extract(value,'$.summary'),json_extract(value,'$.imageUrl') FROM json_each(?) WHERE ${guard}`,
         )
         .bind(
           feedId,
@@ -186,8 +220,8 @@ export class NewsRepository {
         ),
     ]);
   }
-  async queueForGroups(now: number) {
-    for (const group of await this.activeGroups()) {
+  async queueForSubscribers(now: number) {
+    for (const subscriber of await this.activeSubscribers()) {
       const rows = await this.db
         .prepare(
           `WITH backlog AS (SELECT count(*) AS n FROM news_deliveries WHERE chat_id=? AND status IN ('pending','processing')) SELECT *, (SELECT n FROM backlog) AS outstanding FROM (
@@ -197,11 +231,11 @@ export class NewsRepository {
         AND NOT EXISTS(SELECT 1 FROM news_deliveries d WHERE d.chat_id=? AND d.article_id=a.id)) WHERE rank<=3`,
         )
         .bind(
-          group.chat_id,
-          group.activated_at,
+          subscriber.chat_id,
+          subscriber.activated_at,
           now - NEWS_TTL,
           now,
-          group.chat_id,
+          subscriber.chat_id,
         )
         .all<any>();
       const count = Math.max(0, 3 - (rows.results[0]?.outstanding ?? 3));
@@ -213,12 +247,14 @@ export class NewsRepository {
         title: x.title,
         url: x.url,
         publishedAt: x.published_at,
+        summary: x.summary,
+        imageUrl: x.image_url,
       }));
       const selection = selectNews(
         candidates,
         count,
-        group.topic_cursor,
-        JSON.parse(group.source_cursors),
+        subscriber.topic_cursor,
+        JSON.parse(subscriber.source_cursors),
       );
       if (!selection.articles.length) continue;
       await this.db.batch([
@@ -226,28 +262,28 @@ export class NewsRepository {
           .prepare(
             `INSERT OR IGNORE INTO news_deliveries(id,chat_id,article_id,generation,due_at)
           SELECT ? || ':' || value,?,value,?,? FROM json_each(?)
-          WHERE EXISTS(SELECT 1 FROM news_groups WHERE chat_id=? AND enabled=1 AND generation=?)
+          WHERE EXISTS(SELECT 1 FROM news_subscribers WHERE chat_id=? AND enabled=1 AND generation=?)
           LIMIT max(0,3-(SELECT count(*) FROM news_deliveries WHERE chat_id=? AND status IN ('pending','processing')))`,
           )
           .bind(
-            group.chat_id,
-            group.chat_id,
-            group.generation,
+            subscriber.chat_id,
+            subscriber.chat_id,
+            subscriber.generation,
             now,
             JSON.stringify(selection.articles.map((x) => x.id)),
-            group.chat_id,
-            group.generation,
-            group.chat_id,
+            subscriber.chat_id,
+            subscriber.generation,
+            subscriber.chat_id,
           ),
         this.db
           .prepare(
-            "UPDATE news_groups SET topic_cursor=?,source_cursors=? WHERE chat_id=? AND generation=? AND enabled=1",
+            "UPDATE news_subscribers SET topic_cursor=?,source_cursors=? WHERE chat_id=? AND generation=? AND enabled=1",
           )
           .bind(
             selection.cursor,
             JSON.stringify(selection.publishers),
-            group.chat_id,
-            group.generation,
+            subscriber.chat_id,
+            subscriber.generation,
           ),
       ]);
     }
@@ -261,7 +297,7 @@ export class NewsRepository {
   article(id: string) {
     return this.db
       .prepare(
-        "SELECT id,publisher,source_name AS sourceName,topic,title,url,published_at AS publishedAt,guid FROM news_articles WHERE id=?",
+        "SELECT id,publisher,source_name AS sourceName,topic,title,url,published_at AS publishedAt,guid,summary,image_url AS imageUrl FROM news_articles WHERE id=?",
       )
       .bind(id)
       .first<NewsArticle>();
@@ -270,7 +306,9 @@ export class NewsRepository {
     await this.db
       .prepare(
         `UPDATE news_deliveries SET status='expired',lease_token=NULL WHERE status IN ('pending','processing') AND
-      (NOT EXISTS(SELECT 1 FROM news_groups g WHERE g.chat_id=news_deliveries.chat_id AND g.enabled=1 AND g.generation=news_deliveries.generation)
+      (NOT EXISTS(SELECT 1 FROM news_subscribers g WHERE g.chat_id=news_deliveries.chat_id AND g.enabled=1 AND g.generation=news_deliveries.generation)
+      OR NOT EXISTS(SELECT 1 FROM private_users u WHERE u.user_id=news_deliveries.chat_id)
+      OR EXISTS(SELECT 1 FROM blocked_chats b WHERE b.chat_id=news_deliveries.chat_id)
       OR NOT EXISTS(SELECT 1 FROM news_articles a WHERE a.id=news_deliveries.article_id AND a.published_at>?))`,
       )
       .bind(now - NEWS_TTL)
@@ -307,9 +345,9 @@ export class NewsRepository {
     const result = await this.db
       .prepare(
         `INSERT INTO news_send_attempts(chat_id,delivery_id,started_at)
-      SELECT d.chat_id,d.id,? FROM news_deliveries d JOIN news_groups g ON g.chat_id=d.chat_id JOIN news_articles a ON a.id=d.article_id
+      SELECT d.chat_id,d.id,? FROM news_deliveries d JOIN news_subscribers g ON g.chat_id=d.chat_id JOIN news_articles a ON a.id=d.article_id
       WHERE d.id=? AND d.status='processing' AND d.lease_token=? AND d.lease_until>?
-      AND g.enabled=1 AND g.generation=d.generation AND a.published_at>g.activated_at AND a.published_at>? AND a.published_at<=?
+      AND g.enabled=1 AND g.generation=d.generation AND EXISTS(SELECT 1 FROM private_users WHERE user_id=d.chat_id) AND NOT EXISTS(SELECT 1 FROM blocked_chats WHERE chat_id=d.chat_id) AND a.published_at>g.activated_at AND a.published_at>? AND a.published_at<=?
       AND (SELECT count(*) FROM news_send_attempts WHERE chat_id=d.chat_id AND started_at>?)<3`,
       )
       .bind(now, id, token, now, now - NEWS_TTL, now, now - NEWS_WINDOW)
@@ -338,12 +376,12 @@ export class NewsRepository {
       .bind(status, status === "sent" ? now : null, id, token)
       .run();
   }
-  async retryDelivery(id: string, token: string, due: number) {
+  async retryDelivery(id: string, token: string, due: number, mediaFailed = false) {
     await this.db
       .prepare(
-        "UPDATE news_deliveries SET status='pending',due_at=?,attempts=attempts+1,enqueued_at=NULL,lease_token=NULL,lease_until=NULL WHERE id=? AND lease_token=? AND status='processing'",
+        "UPDATE news_deliveries SET status='pending',due_at=?,media_failed=MAX(media_failed,?),attempts=attempts+1,enqueued_at=NULL,lease_token=NULL,lease_until=NULL WHERE id=? AND lease_token=? AND status='processing'",
       )
-      .bind(due, id, token)
+      .bind(due, Number(mediaFailed), id, token)
       .run();
   }
   async prune(now: number) {

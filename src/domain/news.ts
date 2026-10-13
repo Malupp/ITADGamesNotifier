@@ -1,6 +1,8 @@
 export const NEWS_TOPICS = ["games", "cinema", "anime_manga"] as const;
 export type NewsTopic = (typeof NEWS_TOPICS)[number];
 export interface NewsArticle {
+  summary?: string | null;
+  imageUrl?: string | null;
   id: string;
   publisher: string;
   sourceName: string;

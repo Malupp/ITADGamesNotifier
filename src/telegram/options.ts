@@ -32,6 +32,7 @@ export const PRIVATE_COMMANDS = new Set([
   "setscontog",
 ]);
 export const COMMANDS = new Set([
+  "notifiche",
   "news",
   "start",
   "help",

@@ -40,11 +40,13 @@ test("giveaway delivery enables only its freshly verified official URL", async (
         ITAD_API_KEY: "fixture",
         TELEGRAM_BOT_TOKEN: "fixture",
         SCANS_ENABLED: "true",
+        TELEGRAM_CHAT_ID: "-100",
       } as Env,
       {
         fetcher: async (input, init) => {
           const u = new URL(String(input));
           if (u.hostname === "api.telegram.org") {
+            if(u.pathname.endsWith("/getChat")) return Response.json({ok:true,result:{id:-100,type:"channel"}});
             calls.push(JSON.parse(String(init?.body)));
             return Response.json({ ok: true, result: true });
           }
@@ -94,7 +96,7 @@ test("giveaway delivery enables only its freshly verified official URL", async (
           expiry: now + 3600000,
         },
       ],
-      ["7"],
+      ["-100"],
       now,
       false,
     );

@@ -250,8 +250,8 @@ export class KeysRepository {
     const owners = `WITH q AS (SELECT json_extract(value,'$.id') AS game_id,json_extract(value,'$.keyCents') AS price,json_extract(value,'$.retail') AS retail,json_extract(value,'$.regularCents') AS regular,json_extract(value,'$.text') AS text,json_extract(value,'$.appId') AS app_id FROM json_each(?)),
       owners AS (SELECT 'wishlist' AS mode,w.user_id AS owner,w.game_id,w.added_at AS generation,
         MAX(10,COALESCE(w.min_discount_pct,p.min_discount_pct,10)) AS threshold FROM wishlist w LEFT JOIN user_prefs p ON p.user_id=w.user_id JOIN q ON q.game_id=w.game_id
-        UNION ALL SELECT 'general',c.value,q.game_id,0,10 FROM json_each(?) c CROSS JOIN q
-        WHERE EXISTS(SELECT 1 FROM key_games g WHERE g.game_id=q.game_id AND g.release_year IN (2026,2027)))`;
+        UNION ALL SELECT 'general',c.value,q.game_id,u.recent_deals_generation,10 FROM json_each(?) c JOIN private_users u ON u.user_id=c.value CROSS JOIN q
+        WHERE u.recent_deals_enabled=1 AND NOT EXISTS(SELECT 1 FROM blocked_chats WHERE chat_id=u.user_id) AND EXISTS(SELECT 1 FROM key_games g WHERE g.game_id=q.game_id AND g.release_year IN (2026,2027)))`;
     const statements = [
       this.db
         .prepare(

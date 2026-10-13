@@ -1,3 +1,4 @@
+import { enrollPrivateUsers } from "../helpers/notifications.js";
 import test from "node:test";
 import assert from "node:assert/strict";
 import { testDatabase } from "../helpers/sqlite.js";
@@ -67,7 +68,7 @@ function fixture() {
           method === "getMe"
             ? { id: 99, is_bot: true }
             : method === "getChat"
-              ? { id: Number(body.chat_id), type: "supergroup" }
+              ? { id: Number(body.chat_id), type: "private" }
               : { user: { id: body.user_id }, status: botRole },
       });
     }
@@ -134,12 +135,13 @@ function fixture() {
     },
   };
 }
-test("no feed fetch when disabled or zero groups; cron includes news only when enabled", async (t) => {
+test("no feed fetch when disabled or zero subscribers; cron includes news only when enabled", async (t) => {
   const f = fixture();
   t.after(f.d.close);
+  await enrollPrivateUsers(f.d.db,Array.from({length:10},(_,i)=>String(i+1)),f.time-10000);
   await f.cycle();
   assert.equal(f.requests.length, 0);
-  await f.c.news.setEnabled("-1", "group", true, f.time - 10000, 1);
+  await f.c.news.setEnabled("1", "private", true, f.time - 10000, 1);
   f.c.env.NEWS_ENABLED = "false";
   await f.cycle();
   assert.equal(f.requests.length, 0);
@@ -150,10 +152,11 @@ test("no feed fetch when disabled or zero groups; cron includes news only when e
   await enqueueTick(f.c, f.time);
   assert.ok(f.jobs.some((x) => x.kind === "tick" && x.part === "news"));
 });
-test("silent first cycle; next cycle balances three areas, deduplicates and caps each group", async (t) => {
+test("silent first cycle; next cycle balances three areas, deduplicates and caps each subscriber", async (t) => {
   const f = fixture();
   t.after(f.d.close);
-  await f.c.news.setEnabled("-1", "group", true, f.time - 10000, 1);
+  await enrollPrivateUsers(f.d.db,Array.from({length:10},(_,i)=>String(i+1)),f.time-10000);
+  await f.c.news.setEnabled("1", "private", true, f.time - 10000, 1);
   await f.cycle();
   assert.equal(f.sends.length, 0);
   assert.equal(f.requests.length, 8);
@@ -165,18 +168,19 @@ test("silent first cycle; next cycle balances three areas, deduplicates and caps
   assert.ok(f.sends.some((x) => x.text.includes("Anime e manga")));
   assert.ok(
     f.sends.every(
-      (x) => x.chat_id === "-1" && x.text.includes("Leggi la notizia"),
+      (x) => x.chat_id === "1" && x.text.includes("Leggi la notizia"),
     ),
   );
   f.advance();
   await f.cycle();
   assert.equal(f.sends.length, 3);
 });
-test("off, global pause and bot removal prevent pending sends", async (t) => {
-  for (const change of ["off", "pause", "removed"]) {
+test("off, global pause and blocking prevent pending sends", async (t) => {
+  for (const change of ["off", "pause", "blocked"]) {
     const f = fixture();
     t.after(f.d.close);
-    await f.c.news.setEnabled("-1", "group", true, f.time - 10000, 1);
+  await enrollPrivateUsers(f.d.db,Array.from({length:10},(_,i)=>String(i+1)),f.time-10000);
+    await f.c.news.setEnabled("1", "private", true, f.time - 10000, 1);
     await f.cycle();
     f.advance();
     await f.c.news.ingest(
@@ -197,23 +201,23 @@ test("off, global pause and bot removal prevent pending sends", async (t) => {
       },
       f.time,
     );
-    await f.c.news.queueForGroups(f.time);
+    await f.c.news.queueForSubscribers(f.time);
     const [id] = await f.c.news.dispatch(f.time);
     assert.ok(id);
     if (change === "off")
-      await f.c.news.setEnabled("-1", "group", false, f.time, 2);
+      await f.c.news.setEnabled("1", "private", false, f.time, 2);
     if (change === "pause") f.c.env.NEWS_ENABLED = "false";
-    if (change === "removed") f.bot = "left";
+    if (change === "blocked") await f.c.env.DB.prepare("INSERT INTO blocked_chats(chat_id,blocked_at) VALUES(?,?)").bind("1",f.time).run();
     await processJob({ kind: "newsdelivery", id }, f.c, f.time);
     assert.equal(f.sends.length, 0);
-    if (change === "removed")
-      assert.equal((await f.c.news.group("-1")).enabled, 0);
+    if (change === "blocked") assert.equal((await f.c.news.activeSubscribers()).length, 0);
   }
 });
 test("429 retry consumes budget; queue publication failure remains recoverable", async (t) => {
   const f = fixture();
   t.after(f.d.close);
-  await f.c.news.setEnabled("-1", "group", true, f.time - 10000, 1);
+  await enrollPrivateUsers(f.d.db,Array.from({length:10},(_,i)=>String(i+1)),f.time-10000);
+  await f.c.news.setEnabled("1", "private", true, f.time - 10000, 1);
   await f.cycle();
   f.advance();
   await f.c.news.ingest(
@@ -234,7 +238,7 @@ test("429 retry consumes budget; queue publication failure remains recoverable",
     },
     f.time,
   );
-  await f.c.news.queueForGroups(f.time);
+  await f.c.news.queueForSubscribers(f.time);
   f.queueFails = true;
   await assert.rejects(publishNews(f.c, f.time));
   f.queueFails = false;
@@ -256,7 +260,8 @@ test("429 retry consumes budget; queue publication failure remains recoverable",
 test("one broken source does not block other publishers and feed dispatch recovers", async (t) => {
   const f = fixture();
   t.after(f.d.close);
-  await f.c.news.setEnabled("-1", "group", true, f.time - 10000, 1);
+  await enrollPrivateUsers(f.d.db,Array.from({length:10},(_,i)=>String(i+1)),f.time-10000);
+  await f.c.news.setEnabled("1", "private", true, f.time - 10000, 1);
   await f.cycle();
   f.advance();
   f.feedFails = true;
@@ -266,11 +271,12 @@ test("one broken source does not block other publishers and feed dispatch recove
   await f.cycle();
   assert.equal(f.sends.length, 3);
 });
-test("ten-group feed processing stays below fifty D1 queries per invocation", async (t) => {
+test("ten-subscriber feed processing stays below fifty D1 queries per invocation", async (t) => {
   const f = fixture();
   t.after(f.d.close);
+  await enrollPrivateUsers(f.d.db,Array.from({length:10},(_,i)=>String(i+1)),f.time-10000);
   for (let i = 1; i <= 10; i++)
-    await f.c.news.setEnabled("-" + i, "group", true, f.time - 10000, i);
+    await f.c.news.setEnabled("" + i, "private", true, f.time - 10000, i);
   await f.cycle();
   f.advance();
   await scheduleNews(f.c, f.time);
