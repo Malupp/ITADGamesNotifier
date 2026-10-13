@@ -1,8 +1,9 @@
+import type { ReplyMedia } from "../../domain/models.js";
 export interface ResultView {
   userId: string;
   chatId: string;
   expiresAt: number;
-  pages: Array<{ text: string; replyMarkup?: unknown }>;
+  pages: Array<{ text: string; replyMarkup?: unknown; media?: ReplyMedia }>;
   backId?: string;
 }
 

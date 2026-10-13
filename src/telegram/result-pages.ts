@@ -35,7 +35,7 @@ export function viewPage(view: ResultView, id: string, index: number) {
     navigation.push(button("Avanti ▶️", `viewpage|${id}|${index + 1}`));
   if (navigation.length) rows.push(navigation);
   if (view.backId) rows.push([button("↩️ Torna ai titoli", `viewpage|${view.backId}|0`)]);
-  return { text: page.text, replyMarkup: keyboard(rows), expiresAt: view.expiresAt };
+  return { text: page.text, replyMarkup: keyboard(rows), expiresAt: view.expiresAt, media: page.media };
 }
 
 export async function saveView(

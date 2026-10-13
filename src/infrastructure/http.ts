@@ -3,7 +3,7 @@ export class ApiError extends Error {
     public status: number,
     public retryAfter?: number,
     public permanent = false,
-    public telegramReason?: "not_modified" | "message_missing",
+    public telegramReason?: "not_modified" | "message_missing" | "no_text",
   ) {
     super(`API request failed (${status})`);
     this.name = "ApiError";
@@ -49,7 +49,9 @@ export async function request(
                   data.description,
                 )
               ? "message_missing"
-              : undefined
+              : data.description.includes("there is no text in the message to edit")
+                ? "no_text"
+                : undefined
           : undefined,
       );
     }

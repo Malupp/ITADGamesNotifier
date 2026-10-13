@@ -64,7 +64,7 @@ export async function handleCallback(session: BotSession): Promise<void> {
       const index = number(value);
       if (index === null || !Number.isSafeInteger(index)) return;
       const page = viewPage(view, viewId, index);
-      if (page) await reply(page.text, page.replyMarkup, page.expiresAt);
+      if (page) await reply(page.text, page.replyMarkup, page.expiresAt, page.media);
       return;
     }
   } else await acknowledge();

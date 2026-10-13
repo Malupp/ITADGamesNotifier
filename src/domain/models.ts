@@ -64,10 +64,18 @@ export interface TelegramUpdate {
     id: string;
     data?: string;
     from: { id: number; username?: string; first_name?: string };
-    message?: { message_id: number; chat: { id: number } };
+    message?: { message_id: number; chat: { id: number }; photo?: Array<{ file_id: string }> };
   };
 }
+export interface ReplyMedia {
+  photoUrl?: string;
+  previewUrl?: string;
+  isPhoto?: boolean;
+  originMessageId?: number;
+  originRevision?: number;
+}
 export interface Delivery {
+  reply_media?: string | null;
   source?: "itad" | "keyshop" | "keydeal";
   price_generation?: number | null;
   key_app_id?: number | null;

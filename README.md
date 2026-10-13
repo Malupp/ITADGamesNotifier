@@ -5,7 +5,7 @@ Bot Telegram italiano per giochi PC completi riscattabili gratis e ulteriori rib
 - [Apri il bot](https://t.me/ITADgamesnotifierbot): /start o /help spiega tutti i comandi.
 - /wishlist mostra una pagina di massimo dieci giochi in **un unico messaggio**; i pulsanti aggiornano quel messaggio.
 - Scansioni ogni 30 minuti; avviso wishlist soltanto con sconto effettivo e ulteriore ribasso almeno del 10% dal riferimento consegnato.
-- Giveaway verificati ufficialmente su Epic/Steam per l'Italia, senza abbonamento obbligatorio.
+- Giveaway verificati ufficialmente su Epic/Steam per l'Italia, senza abbonamento obbligatorio. `/deals` mostra una scheda per gioco con foto, descrizione e navigazione nello stesso messaggio.
 - News RSS italiane di videogiochi, film, anime e manga nella chat privata, con un toggle personale. Nei gruppi il bot non risponde.
 
 Il codice attivo entra da [src/index.ts](src/index.ts). Parti dalla [mappa dell'architettura](docs/architecture.md) per trovare il modulo da modificare; il [runbook Cloudflare](docs/cloudflare.md) descrive quote, backup, rilascio e rollback. Il vecchio bot è archiviato in [legacy/python](legacy/python/README.md).

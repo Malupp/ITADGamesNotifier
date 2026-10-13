@@ -1,5 +1,6 @@
 import { measure } from "./telemetry.js";
 import type { ApplicationContext } from "./context.js";
+import type { Delivery, ReplyMedia } from "../domain/models.js";
 import { ApiError } from "../infrastructure/http.js";
 import { enabled, backoff, errorCode } from "./retries.js";
 import { publishJobs } from "../runtime/queues.js";
@@ -32,7 +33,9 @@ export async function processDelivery(
   }
   const activity = await context.preferences.privateActivity(d.chat_id);
   let attemptedAt = now;
+  let replyMedia: ReplyMedia | undefined;
   try {
+    replyMedia = d.reply_media ? JSON.parse(d.reply_media) : undefined;
     if (
       (d.kind !== "giveaway" && !/^[1-9]\d*$/.test(d.chat_id)) ||
       (d.kind === "giveaway" && (
@@ -105,19 +108,38 @@ export async function processDelivery(
       photo = valid[0].imageUrl;
     }
     const markup = d.reply_markup ? JSON.parse(d.reply_markup) : undefined;
+    if (replyMedia?.originMessageId != null && await context.deliveries.isObsoleteEdit(d)) {
+      await context.deliveries.expireDelivery(d);
+      return null;
+    }
     attemptedAt = Math.max(now, context.now());
     if (d.operation === "edit") {
       if (d.kind !== "reply" || d.telegram_message_id === null)
         throw new ApiError(400, undefined, true);
+      if (replyMedia?.isPhoto && !replyMedia.photoUrl && replyMedia.previewUrl)
+        return textMediaFallback(context, d, text, markup, replyMedia.previewUrl, now);
       await measure(
         "delivery",
-        () =>
-          context.telegram.editMessage(
-            d.chat_id,
-            d.telegram_message_id!,
-            text,
-            markup,
-          ),
+        async () => {
+          if (replyMedia?.photoUrl) {
+            try {
+              await context.telegram.editPhoto(d.chat_id, d.telegram_message_id!, text, replyMedia.photoUrl, markup);
+            } catch (error) {
+              if (!(error instanceof ApiError) || error.status !== 400 || error.telegramReason || replyMedia.isPhoto) throw error;
+              // A rejected cover on an existing text message can stay text.
+              await context.telegram.editMessage(d.chat_id, d.telegram_message_id!, text, markup, replyMedia.previewUrl);
+            }
+          } else if (replyMedia?.isPhoto)
+            await context.telegram.editCaption(d.chat_id, d.telegram_message_id!, text, markup);
+          else {
+            try {
+              await context.telegram.editMessage(d.chat_id, d.telegram_message_id!, text, markup, replyMedia?.previewUrl);
+            } catch (error) {
+              if (!(error instanceof ApiError) || error.telegramReason !== "no_text" || replyMedia?.previewUrl) throw error;
+              await context.telegram.editCaption(d.chat_id, d.telegram_message_id!, text, markup);
+            }
+          }
+        },
         context.recordTiming,
       );
     } else
@@ -125,7 +147,9 @@ export async function processDelivery(
         "delivery",
         () => d.kind === "giveaway"
           ? context.telegram.sendIllustrated(d.chat_id, text, photo, previewUrl)
-          : context.telegram.sendMessage(d.chat_id, text, markup, previewUrl),
+          : d.kind === "reply" && replyMedia
+            ? context.telegram.sendIllustrated(d.chat_id, text, replyMedia.photoUrl, replyMedia.previewUrl, markup)
+            : context.telegram.sendMessage(d.chat_id, text, markup, previewUrl),
         context.recordTiming,
       );
     await context.deliveries.completeDelivery(d, Date.now());
@@ -138,6 +162,13 @@ export async function processDelivery(
     ) {
       await context.deliveries.completeDelivery(d, Date.now());
       return null;
+    }
+    if (
+      d.operation === "edit" && replyMedia && (replyMedia.photoUrl || replyMedia.previewUrl) &&
+      e instanceof ApiError && e.status === 400 && (!e.telegramReason || e.telegramReason === "no_text")
+    ) {
+      const markup = d.reply_markup ? JSON.parse(d.reply_markup) : undefined;
+      return textMediaFallback(context, d, d.text, markup, replyMedia.previewUrl, now);
     }
     if (
       d.operation === "edit" &&
@@ -180,6 +211,30 @@ export async function processDelivery(
     }
     const delay = backoff(e, d.attempts);
     await context.deliveries.retryDelivery(d, now + delay * 1000, errorCode(e));
+    return delay;
+  }
+}
+
+/** Keep the old photo paired with its old caption; reopen an unavailable page as text. */
+async function textMediaFallback(
+  context: ApplicationContext, d: Delivery, text: string, markup: unknown,
+  previewUrl: string | undefined, now: number,
+): Promise<number | null> {
+  if (await context.deliveries.isObsoleteEdit(d)) {
+    await context.deliveries.expireDelivery(d);
+    return null;
+  }
+  try {
+    const id = await context.deliveries.queueMessage(
+      `${d.id}:media-text`, d.chat_id, text, markup, d.expires_at,
+      { previewUrl, originMessageId: d.telegram_message_id ?? undefined, originRevision: d.view_revision ?? undefined },
+    );
+    await publishJobs(context, [{ kind: "delivery", id }], "interactive");
+    await context.deliveries.expireDelivery(d);
+    return null;
+  } catch (error) {
+    const delay = backoff(error, d.attempts);
+    await context.deliveries.retryDelivery(d, now + delay * 1000, errorCode(error));
     return delay;
   }
 }

@@ -305,8 +305,16 @@ test("help and status explain thirty minute monitoring and confirmed delivery re
     );
     assert.ok(h.replies()[0].text.includes("30 minuti"));
     assert.ok(h.replies()[0].text.includes("10%"));
-    assert.ok(h.replies()[0].text.includes("ultima notifica"));
     assert.ok(h.replies()[1].text.includes("Scansione"));
+    let help = h.replies()[0], helpText = help.text, updateId = 3;
+    while (true) {
+      const next = JSON.parse(help.reply_markup).inline_keyboard.flat().find((b: any) => b.text.includes("Avanti"));
+      if (!next) break;
+      await handleUpdate(createContext(h.env, { fetcher: h.fetcher }), callback(next.callback_data, updateId++));
+      help = h.replies().at(-1);
+      helpText += "\n" + help.text;
+    }
+    assert.ok(helpText.includes("ultima notifica"));
   } finally {
     h.cleanup();
   }

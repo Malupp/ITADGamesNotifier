@@ -57,21 +57,37 @@ export class TelegramClient {
       !["private", "channel", "group", "supergroup"].includes(chat?.type)) throw new ApiError(502);
     return chat.type;
   }
-  async sendPhoto(chatId: string,caption: string,photo: string): Promise<void> {
-    await this.call("sendPhoto", { chat_id: chatId, photo, caption, parse_mode: "HTML" });
+  async sendPhoto(chatId: string,caption: string,photo: string,replyMarkup?: unknown): Promise<void> {
+    await this.call("sendPhoto", {
+      chat_id: chatId, photo, caption, parse_mode: "HTML",
+      ...(replyMarkup === undefined ? {} : { reply_markup: replyMarkup }),
+    });
+  }
+  async editPhoto(chatId: string, messageId: number, caption: string, photo: string, replyMarkup?: unknown): Promise<void> {
+    await this.call("editMessageMedia", {
+      chat_id: chatId, message_id: messageId,
+      media: { type: "photo", media: photo, caption, parse_mode: "HTML" },
+      ...(replyMarkup === undefined ? {} : { reply_markup: replyMarkup }),
+    });
+  }
+  async editCaption(chatId: string, messageId: number, caption: string, replyMarkup?: unknown): Promise<void> {
+    await this.call("editMessageCaption", {
+      chat_id: chatId, message_id: messageId, caption, parse_mode: "HTML",
+      ...(replyMarkup === undefined ? {} : { reply_markup: replyMarkup }),
+    });
   }
   async sendIllustrated(
-    chatId: string, text: string, photo?: string | null, previewUrl?: string,
+    chatId: string, text: string, photo?: string | null, previewUrl?: string, replyMarkup?: unknown,
   ): Promise<void> {
     if (photo) {
       try {
-        await this.sendPhoto(chatId, text, photo);
+        await this.sendPhoto(chatId, text, photo, replyMarkup);
         return;
       } catch (error) {
         if (!(error instanceof ApiError) || error.status !== 400) throw error;
       }
     }
-    await this.sendMessage(chatId, text, undefined, previewUrl);
+    await this.sendMessage(chatId, text, replyMarkup, previewUrl);
   }
   async sendMessage(
     chatId: string,
@@ -100,13 +116,16 @@ export class TelegramClient {
     messageId: number,
     text: string,
     replyMarkup?: unknown,
+    previewUrl?: string,
   ): Promise<void> {
     await this.call("editMessageText", {
       chat_id: chatId,
       message_id: messageId,
       text,
       parse_mode: "HTML",
-      link_preview_options: { is_disabled: true },
+      link_preview_options: previewUrl
+        ? { is_disabled: false, url: previewUrl, prefer_large_media: true }
+        : { is_disabled: true },
       ...(replyMarkup === undefined ? {} : { reply_markup: replyMarkup }),
     });
   }

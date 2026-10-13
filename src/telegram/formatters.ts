@@ -21,6 +21,7 @@ export function money(cents: number): string {
 }
 
 export function formatGiveaway(offer: Offer): string {
+  const url = safeUrl(offer.url);
   return (
     `🎁 <b>Gioco gratis da tenere</b>\n\n🎮 <b>${escapeHtml(offer.title.slice(0,200))}</b>` +
     (offer.description ? `\n\n${escapeHtml(offer.description.slice(0,420))}` : "") +
@@ -29,7 +30,9 @@ export function formatGiveaway(offer: Offer): string {
     (offer.expiry === null
       ? ""
       : `\n⏳ Scade il ${formatExpiry(offer.expiry)} (Italia)`) +
-    `\n\n🔗 <a href="${escapeHtml(offer.url)}">Riscatta il gioco</a>`
+    (url && escapeHtml(url).length <= 2048
+      ? `\n\n🔗 <a href="${escapeHtml(url)}">Riscatta il gioco</a>`
+      : "")
   );
 }
 export function formatPrice(title: string, quote: PriceQuote): string {

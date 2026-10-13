@@ -4,6 +4,7 @@ import type {
   Offer,
   Preferences,
   PriceQuote,
+  ReplyMedia,
   TelegramUpdate,
   WishlistItem,
 } from "../../domain/models.js";
@@ -31,6 +32,7 @@ export class DeliveriesRepository {
     revision: number,
     replyMarkup?: unknown,
     expiresAt?: number,
+    media?: ReplyMedia,
   ): Promise<string> {
     if (
       !Number.isSafeInteger(messageId) ||
@@ -42,8 +44,8 @@ export class DeliveriesRepository {
     const now = Date.now();
     await this.db
       .prepare(
-        `INSERT INTO deliveries(id,kind,chat_id,text,reply_markup,due_at,expires_at,operation,telegram_message_id,view_revision)
-      VALUES(?,'reply',?,?,?,?,?,'edit',?,?) ON CONFLICT(id) DO NOTHING`,
+        `INSERT INTO deliveries(id,kind,chat_id,text,reply_markup,due_at,expires_at,operation,telegram_message_id,view_revision,reply_media)
+      VALUES(?,'reply',?,?,?,?,?,'edit',?,?,?) ON CONFLICT(id) DO NOTHING`,
       )
       .bind(
         key,
@@ -54,12 +56,16 @@ export class DeliveriesRepository {
         expiresAt ?? now + 86400000,
         messageId,
         revision,
+        media ? JSON.stringify(media) : null,
       )
       .run();
     return key;
   }
   async isObsoleteEdit(delivery: Delivery): Promise<boolean> {
-    if (delivery.operation !== "edit") return false;
+    const media: ReplyMedia | undefined = delivery.reply_media ? JSON.parse(delivery.reply_media) : undefined;
+    const messageId = delivery.operation === "edit" ? delivery.telegram_message_id : media?.originMessageId;
+    const revision = delivery.operation === "edit" ? delivery.view_revision : media?.originRevision;
+    if (messageId == null || revision == null) return false;
     return Boolean(
       await this.db
         .prepare(
@@ -68,8 +74,8 @@ export class DeliveriesRepository {
         )
         .bind(
           delivery.chat_id,
-          delivery.telegram_message_id,
-          delivery.view_revision,
+          messageId,
+          revision,
         )
         .first(),
     );
@@ -94,11 +100,12 @@ export class DeliveriesRepository {
     text: string,
     replyMarkup?: unknown,
     expiresAt?: number | null,
+    media?: ReplyMedia,
   ): Promise<string> {
     await this.db
       .prepare(
-        `INSERT INTO deliveries(id,kind,chat_id,text,reply_markup,due_at,expires_at)
-      VALUES(?,'reply',?,?,?,?,?) ON CONFLICT(id) DO NOTHING`,
+        `INSERT INTO deliveries(id,kind,chat_id,text,reply_markup,due_at,expires_at,reply_media)
+      VALUES(?,'reply',?,?,?,?,?,?) ON CONFLICT(id) DO NOTHING`,
       )
       .bind(
         key,
@@ -107,6 +114,7 @@ export class DeliveriesRepository {
         replyMarkup == null ? null : JSON.stringify(replyMarkup),
         Date.now(),
         expiresAt ?? Date.now() + 24 * 60 * 60 * 1000,
+        media ? JSON.stringify(media) : null,
       )
       .run();
     return key;

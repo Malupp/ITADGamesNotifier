@@ -84,13 +84,23 @@ for (const command of ["/confronta Game", "/offerte 20 20 0", "/offerte_shop 1-2
   });
 }
 
-test("deals returns a single message with every cached gift", async () => {
+test("deals keeps every cached gift accessible by editing a single message", async () => {
   const h = setup();
   try {
     await h.context().giveaways.ingestGiveaways(Array.from({ length: 3 }, (_, n) => ({ id: `gift-${n}`, gameId: game(n).id, slug: game(n).slug, title: game(n).title, shop: "Epic Games Store", url: `https://store.epicgames.com/p/game-${n}`, expiry: Date.now() + 86400000 })), [], Date.now(), true);
     await handleUpdate(h.context(), msg("/deals"));
     assert.equal(h.rows().length, 1);
-    for (let n = 0; n < 3; n++) assert.match(h.rows()[0].text, new RegExp(`Game ${n}`));
+    let current = h.rows()[0], text = current.text;
+    for (let n = 1; n < 3; n++) {
+      const next = buttons(current).find(b => /Avanti/.test(b.text));
+      assert.ok(next);
+      await handleUpdate(h.context(), cb(next.callback_data, n + 1));
+      current = h.rows().at(-1);
+      assert.equal(current.operation, "edit");
+      text += current.text;
+    }
+    for (let n = 0; n < 3; n++) assert.match(text, new RegExp(`Game ${n}`));
+    assert.equal(h.rows().filter(r => r.operation === "send").length, 1);
   } finally { h.close(); }
 });
 

@@ -8,7 +8,8 @@ import { saveView } from "./result-pages.js";
 import { safeUrl } from "../domain/urls.js";
 import { keysEnabled, interactiveKeys } from "../application/keys.js";
 import { keyText } from "../infrastructure/d1/keys.js";
-import { formatExpiry, quoteText, money } from "./formatters.js";
+import { formatExpiry, formatGiveaway, quoteText, money } from "./formatters.js";
+import { imageUrl } from "../infrastructure/content.js";
 import {
   SHOPS,
   SHOP_IDS,
@@ -98,27 +99,22 @@ export async function handleCommand(session: BotSession): Promise<void> {
         "😔 Nessun gioco completo gratuito da riscattare al momento.",
       );
     else {
-      const blocks = offers.map((offer) => {
-        const url = safeUrl(offer.url);
-        return (
-          `🎮 <b>${html(offer.title, 100)}</b>\n🏪 ${html(offer.shop, 60)} · <b>GRATIS da riscattare</b>` +
-          (offer.expiry === null
-            ? ""
-            : `\n⏳ Scade il ${formatExpiry(offer.expiry)} (Italia)`) +
-          (url && html(url, 10000).length <= 2048
-            ? `\n<a href="${html(url, 10000)}">Riscatta il gioco</a>`
-            : "")
-        );
-      });
-      await showList(
-        "🎁 <b>Giochi gratis da riscattare</b>",
-        blocks,
+      const page = await saveView(
+        context, String(update.update_id), userId, chatId,
+        offers.map((offer, index) => ({
+          text: formatGiveaway(offer) + (offers.length > 1 ? `\n\nGioco ${index + 1} di ${offers.length}` : ""),
+          media: {
+            photoUrl: imageUrl(offer.imageUrl) ?? undefined,
+            previewUrl: safeUrl(offer.url) ?? undefined,
+          },
+        })),
         undefined,
         Math.min(
           context.now() + 86400000,
           ...offers.map((offer) => offer.expiry ?? Infinity),
         ),
       );
+      await reply(page.text, page.replyMarkup, page.expiresAt, page.media);
     }
     return;
   }

@@ -1,5 +1,5 @@
 import type { ApplicationContext } from "../application/context.js";
-import type { Game, TelegramUpdate } from "../domain/models.js";
+import type { Game, TelegramUpdate, ReplyMedia } from "../domain/models.js";
 import { formatExpiry, quoteText } from "./formatters.js";
 import { showWishlist } from "./wishlist.js";
 import { resultPages, saveView } from "./result-pages.js";
@@ -34,11 +34,11 @@ export function createSession(
       message.chat.type === "private");
   const itad = context.itad;
   let ordinal = 0;
-  const reply = (text: string, markup?: unknown, expiresAt?: number) => {
+  const reply = (text: string, markup?: unknown, expiresAt?: number, media?: ReplyMedia) => {
     const key = `reply:${update.update_id}:${ordinal++}`;
     const messageId = callback?.message?.message_id;
     return messageId === undefined
-      ? context.deliveries.queueMessage(key, chatId, text, markup, expiresAt)
+      ? context.deliveries.queueMessage(key, chatId, text, markup, expiresAt, media)
       : context.deliveries.queueEdit(
           key,
           chatId,
@@ -47,6 +47,7 @@ export function createSession(
           update.update_id,
           markup ?? { inline_keyboard: [] },
           expiresAt,
+          callback?.message?.photo?.length ? { ...media, isPhoto: true } : media,
         );
   };
   const privateOnly = () =>
